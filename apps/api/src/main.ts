@@ -1,5 +1,6 @@
-import { buildApp } from './app.js';
+import { buildApp } from './build-app.js';
 
+// Local / long-running entry. On Vercel the platform uses src/server.ts instead.
 const port = Number(process.env.PORT ?? 8787);
 const app = buildApp();
 

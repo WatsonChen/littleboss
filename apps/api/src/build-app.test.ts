@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { HealthResponse } from '@littleboss/shared';
-import { buildApp } from './app.js';
+import { buildApp } from './build-app.js';
+
+// Without keys the Inngest SDK refuses to serve in cloud mode (by design), so tests use dev mode.
+vi.hoisted(() => {
+  process.env.INNGEST_DEV = '1';
+});
 
 describe('GET /health', () => {
   it('returns a body that matches the shared contract', async () => {
@@ -25,6 +30,14 @@ describe('GET /health', () => {
       headers: { origin: 'https://evil.example' },
     });
     expect(bad.headers['access-control-allow-origin']).toBeUndefined();
+    await app.close();
+  });
+
+  it('serves the Inngest endpoint and lists the ping function', async () => {
+    const app = buildApp();
+    const res = await app.inject({ method: 'GET', url: '/api/inngest' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ function_count: 1 });
     await app.close();
   });
 });

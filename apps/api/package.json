@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch src/main.ts",
     "build": "tsup",
-    "start": "node dist/server.js",
+    "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:migrate": "tsx src/db/migrate-cli.ts"
@@ -15,6 +15,7 @@
     "@fastify/cors": "^11.3.1",
     "@littleboss/shared": "workspace:*",
     "fastify": "^5.12.7",
+    "inngest": "^4.24.0",
     "pg": "^8.23.1"
   },
   "devDependencies": {

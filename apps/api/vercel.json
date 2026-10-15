@@ -1,0 +1,5 @@
+{
+  "framework": null,
+  "regions": ["sin1"],
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
+}
