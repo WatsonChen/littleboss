@@ -38,8 +38,9 @@ export async function migrate(pool: Pool, dir = MIGRATIONS_DIR): Promise<string[
         throw new Error(`migration ${file} failed: ${(err as Error).message}`, { cause: err });
       }
     }
-    await client.query('select pg_advisory_unlock(727274)');
   } finally {
+    // Always let go of the lock: a failed migration must not leave the pooled connection holding it.
+    await client.query('select pg_advisory_unlock(727274)').catch(() => undefined);
     client.release();
   }
   return applied;

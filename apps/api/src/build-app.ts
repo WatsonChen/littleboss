@@ -3,9 +3,21 @@ import cors from '@fastify/cors';
 import { serve } from 'inngest/fastify';
 import { HealthResponse } from '@littleboss/shared';
 import { inngest } from './inngest/client.js';
-import { functions } from './inngest/functions.js';
+import { ping } from './inngest/functions.js';
+import { createPool, type Pool } from './db/pool.js';
+import { createAiCallFunction } from './discussion/inngest.js';
+import { createDiscussionService, type DiscussionService } from './discussion/index.js';
+import { HttpError } from './discussion/errors.js';
+import { registerDiscussionRoutes } from './discussion/routes.js';
 
-export function buildApp() {
+export interface BuildAppOptions {
+  /** Inject a ready service (tests). Otherwise one is created lazily from DATABASE_URL. */
+  discussion?: DiscussionService;
+  env?: Record<string, string | undefined>;
+}
+
+export function buildApp(opts: BuildAppOptions = {}) {
+  const env = opts.env ?? process.env;
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test' });
 
   // Browser access is limited to the configured web origin(s); comma-separated.
@@ -24,11 +36,47 @@ export function buildApp() {
     return HealthResponse.parse(body);
   });
 
+  // The database and the discussion service are only created when first needed, so the health
+  // check and Inngest sync keep working while the database is not configured yet.
+  let service = opts.discussion;
+  let pool: Pool | undefined;
+  const getService = (): DiscussionService => {
+    if (service) return service;
+    if (!env.DATABASE_URL) {
+      throw new HttpError(503, 'database_not_configured', 'The database is not connected yet.');
+    }
+    pool = createPool(env.DATABASE_URL);
+    service = createDiscussionService(env, pool);
+    return service;
+  };
+  app.addHook('onClose', async () => {
+    await pool?.end();
+  });
+  registerDiscussionRoutes(app, getService, env);
+
+  // Checks the database connection without exposing anything but whether it works and how fast.
+  app.get('/health/db', async (_req, reply) => {
+    const started = Date.now();
+    try {
+      const db = getService().db();
+      await db.query('select 1');
+      return {
+        ok: true,
+        latencyMs: Date.now() - started,
+        migrations: await db.countMigrations(),
+      };
+    } catch (err) {
+      const code =
+        err instanceof HttpError ? err.code : ((err as { code?: string }).code ?? 'db_error');
+      return reply.status(503).send({ ok: false, error: String(code) });
+    }
+  });
+
   // Inngest calls this endpoint to sync and to run steps; requests are verified with the signing key.
   app.route({
     method: ['GET', 'POST', 'PUT'],
     url: '/api/inngest',
-    handler: serve({ client: inngest, functions }),
+    handler: serve({ client: inngest, functions: [ping, createAiCallFunction(getService)] }),
   });
 
   return app;
