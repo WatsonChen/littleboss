@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.1",
     "@littleboss/shared": "workspace:*",
     "fastify": "^5.12.7"
   },
