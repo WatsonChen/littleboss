@@ -62,6 +62,26 @@
 - 連線池連線（PgBouncer，交易模式）不支援 LISTEN/NOTIFY、工作階段層級的 advisory lock、`SET`。遷移與需要工作階段狀態的工作要用直連。
 - Free 方案是否允許商業使用：頁面沒說明，**未查證**。暫停後第一次查詢的喚醒延遲：**未查證**。
 
+## 實測：Vercel Workflows 本機試做（2026-10-15）
+
+在一個獨立的小專案裡試過，版本為 `workflow` 5.2.2、`nitro` 3.0.260903-beta、`fastify` 5.12.7。不需要 Vercel 帳號，用的是 SDK 預設的本機儲存（資料寫在 `.workflow-data/`）。
+
+| 觀察                                         | 結果                                                          |
+| -------------------------------------------- | ------------------------------------------------------------- |
+| Fastify 能不能用                             | 可以，但需要 Nitro 當建置系統，不是現在的 tsup                |
+| 正常流程（步驟、等待 hook、核准、續跑）      | 通過                                                          |
+| 等待核准時把伺服器行程強制結束，再重啟後核准 | 通過；步驟 `prepare` 只執行一次，沒有重做（對應 F2 的本機版） |
+| 核准早於 hook 登記（run 還沒建立）           | **不會被保留**：`resumeHook` 回 `HookNotFoundError`           |
+| 重複核准（run 已完成之後）                   | 也回 `HookNotFoundError`，不是「已處理」                      |
+
+意義：
+
+- 核准一定要先存進我們自己的資料庫，再嘗試 `resumeHook`。早到的核准與重複的核准，都要由資料庫決定結果，不能靠引擎回應。這證實了前面「先查資料庫、登記 hook、再查一次」的規則是必要的。
+- 這是本機儲存的結果，**不代表** Vercel 上的行為相同。
+- 還有一個 `@workflow/world-postgres` 套件可以把狀態存進 Postgres（文件有列出，未實測）。若可行，狀態就不必留在 Vercel 的儲存，之後搬離 Vercel 也較容易。它與 Neon 連線池的相容性（LISTEN/NOTIFY）**未查證**。
+- 步驟必須是頂層、帶 `'use step'` 指令的函式，沒有辦法把閉包當步驟傳進去。目前的 `FlowContext.step(name, fn)` 用閉包，轉接 Workflow SDK 前要改成「具名步驟加可序列化的輸入」。這個改法對 Inngest 也適用。
+- 採用 Workflow SDK 代表 `apps/api` 的建置要改成 Nitro；Nitro 3 目前是 beta 版本。這是依賴成熟度的風險。
+
 ## 對 little boss 的意義
 
 - 核准存在自己的資料庫，不依賴引擎的事件機制（已實作，見 `apps/api/src/core/approval.ts`）。
