@@ -72,6 +72,9 @@ class ServerProcess {
     return !this.exited && !!c && c.exitCode === null && c.signalCode === null;
   }
 
+  /** Extra environment for the next start (the test can change it between restarts). */
+  env: Record<string, string> = {};
+
   async start(): Promise<void> {
     if (this.alive) return;
     this.exited = false;
@@ -85,6 +88,7 @@ class ServerProcess {
         INNGEST_BASE_URL: `http://127.0.0.1:${INNGEST_PORT}`,
         INNGEST_DEV: '1',
         SPIKE_WAIT_TIMEOUT: process.env.SPIKE_WAIT_TIMEOUT ?? '1h',
+        ...this.env,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -174,6 +178,56 @@ export class InngestHarnessFactory {
     await this.server.start();
     this.inngestDev = await startInngestDevServer();
     await this.syncApp();
+  }
+
+  /** Restart the app with different settings, and register it again (a deploy does both). */
+  async restartServerWith(env: Record<string, string>): Promise<void> {
+    await this.server.kill();
+    this.server.env = env;
+    await this.server.start();
+    await this.syncApp();
+  }
+  async killServer(): Promise<void> {
+    await this.server.kill();
+  }
+  async startServer(): Promise<void> {
+    await this.server.start();
+  }
+  /** Runs one reconcile pass inside the app and returns what it did. */
+  async reconcile(olderThanMs: number): Promise<{ runId: string; action: string }[]> {
+    const res = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/reconcile`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ olderThanMs }),
+    });
+    return (await res.json()) as { runId: string; action: string }[];
+  }
+  /** Direct database access for assertions about our own records. */
+  get db(): pg.Pool {
+    return this.pool;
+  }
+  /** The engine's own statuses for the runs of one start event (read through its REST API). */
+  async engineStatuses(engineEventId: string): Promise<string[]> {
+    const base = `http://127.0.0.1:${INNGEST_PORT}`;
+    const list = (await (await fetch(`${base}/v1/events/${engineEventId}/runs`)).json()) as {
+      data?: { run_id: string }[] | null;
+    };
+    const out: string[] = [];
+    for (const r of list.data ?? []) {
+      const run = (await (await fetch(`${base}/v1/runs/${r.run_id}`)).json()) as {
+        data: { status: string };
+      };
+      out.push(run.data.status);
+    }
+    return out;
+  }
+  /** Send a fault to the app (the same routes the contract's `inject` uses). */
+  async inject(kind: string, times = 1): Promise<void> {
+    await fetch(`http://127.0.0.1:${SERVER_PORT}/api/inject`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind, step: 'finish', times }),
+    });
   }
 
   /** Tell the dev server where our app is (the same registration a deploy performs). */

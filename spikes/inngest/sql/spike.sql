@@ -9,3 +9,7 @@ create table if not exists spike_run_view (
   config          jsonb not null,
   updated_at      timestamptz not null default clock_timestamp()
 );
+
+-- Protection layer: which Inngest event started the run, and when we last asked Inngest about it.
+alter table spike_run_view add column if not exists engine_event_id text;
+alter table spike_run_view add column if not exists reconciled_at timestamptz;

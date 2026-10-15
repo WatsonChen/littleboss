@@ -52,4 +52,10 @@ export async function checkApproval(runId: string, stepName: string, proposalHas
 }
 
 export const setActiveState = view.setActiveState;
-export const finishRun = (runId: string, outcome: FlowOutcome) => view.finish(runId, outcome);
+export async function finishRun(runId: string, outcome: FlowOutcome) {
+  if (faults.failFinish > 0) {
+    faults.failFinish -= 1;
+    throw new Error('injected failure of finish');
+  }
+  await view.finish(runId, outcome);
+}
