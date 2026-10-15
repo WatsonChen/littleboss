@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { ApprovalService, InMemoryApprovalRepository } from './approval.js';
 import { runEngineContract, type EngineHarness } from './engine-contract.js';
 import { FakeExternalService } from './fake-external.js';
@@ -6,7 +7,10 @@ import {
   calendarWriteFlow,
   proposalHashFor,
   type CalendarWriteInput,
+  type FlowContext,
+  type FlowOutcome,
   type RunConfig,
+  type StepDef,
 } from './flow.js';
 import { ReferenceEngine } from './reference-engine.js';
 
@@ -15,7 +19,8 @@ function makeReferenceHarness(): EngineHarness {
   const approvals = new ApprovalService(new InMemoryApprovalRepository());
   const engine = new ReferenceEngine({
     approvals,
-    flow: (ctx, input) => calendarWriteFlow(ctx, { external }, input as CalendarWriteInput),
+    flow: (ctx, input) => calendarWriteFlow(ctx, input as CalendarWriteInput),
+    env: { external },
   });
   const inputs = new Map<string, CalendarWriteInput>();
   const live: RunConfig = { roleVersion: 'v1', model: 'm1', maxRetries: 2 };
@@ -55,3 +60,43 @@ function makeReferenceHarness(): EngineHarness {
 }
 
 runEngineContract('reference engine (in-memory)', makeReferenceHarness);
+
+describe('reference engine: step data rules', () => {
+  const makeEngine = (flow: (ctx: FlowContext) => Promise<FlowOutcome>) =>
+    new ReferenceEngine({
+      approvals: new ApprovalService(new InMemoryApprovalRepository()),
+      flow: (ctx) => flow(ctx),
+      env: { external: new FakeExternalService() },
+    });
+  const config: RunConfig = { roleVersion: 'v1', model: 'm1', maxRetries: 0 };
+
+  it('fails a run whose step result cannot be serialized', async () => {
+    const bad: StepDef<null, unknown> = { name: 'bad', run: async () => undefined };
+    const engine = makeEngine(async (ctx) => {
+      await ctx.step(bad, null);
+      return { status: 'rejected' };
+    });
+    await engine.startRun('r1', config, null);
+    const view = engine.view('r1');
+    expect(view.state).toBe('failed');
+    expect(view.outcome).toMatchObject({ status: 'failed' });
+  });
+
+  it('gives the same value on first run and on replay (no hidden in-memory state)', async () => {
+    const stamp: StepDef<null, { at: Date }> = {
+      name: 'stamp',
+      run: async () => ({ at: new Date(0) }),
+    };
+    const seen: unknown[] = [];
+    const engine = makeEngine(async (ctx) => {
+      seen.push((await ctx.step(stamp, null)).at);
+      await ctx.waitForApproval('gate', 'h');
+      return { status: 'rejected' };
+    });
+    await engine.startRun('r1', config, null);
+    await engine.recoverAll();
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBe('1970-01-01T00:00:00.000Z'); // a Date comes back as its JSON string
+    expect(seen[1]).toEqual(seen[0]);
+  });
+});

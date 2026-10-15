@@ -1,5 +1,12 @@
 import type { ApprovalService } from './approval.js';
-import type { ApprovalOutcome, FlowContext, FlowOutcome, RunConfig } from './flow.js';
+import type {
+  ApprovalOutcome,
+  FlowContext,
+  FlowOutcome,
+  RunConfig,
+  StepDef,
+  StepEnv,
+} from './flow.js';
 
 /**
  * In-memory reference engine with journal-and-replay semantics (the model used by durable
@@ -30,7 +37,8 @@ interface RunRecord {
   id: string;
   config: Readonly<RunConfig>;
   input: unknown;
-  journal: Map<string, unknown>;
+  /** JSON text of each recorded step result, exactly what a durable store would hold. */
+  journal: Map<string, string>;
   executions: Map<string, number>;
   state: RunState;
   outcome?: FlowOutcome;
@@ -57,7 +65,7 @@ export class ReferenceEngine {
     onStepStart: new Map<string, (runId: string) => void>(),
   };
 
-  constructor(private readonly deps: { approvals: ApprovalService; flow: Flow }) {}
+  constructor(private readonly deps: { approvals: ApprovalService; flow: Flow; env: StepEnv }) {}
 
   /** Idempotent: starting an existing run id returns the existing run. Config is frozen here. */
   async startRun(runId: string, config: RunConfig, input: unknown): Promise<void> {
@@ -140,8 +148,10 @@ export class ReferenceEngine {
       runId: run.id,
       config: run.config,
 
-      step: async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
-        if (run.journal.has(name)) return run.journal.get(name) as T;
+      step: async <I, O>(def: StepDef<I, O>, input: I): Promise<O> => {
+        const name = def.name;
+        const recorded = run.journal.get(name);
+        if (recorded !== undefined) return JSON.parse(recorded) as O;
         if (run.cancelRequested) throw new CancelledSignal();
         if (this.faults.crashBefore.delete(name)) throw new SimulatedCrash();
         this.faults.onStepStart.get(name)?.(run.id);
@@ -156,11 +166,14 @@ export class ReferenceEngine {
               this.faults.failAttempts.set(name, pending - 1);
               throw new Error(`injected failure in ${name}`);
             }
-            const value = await fn();
+            // Input and output must survive JSON, like in an engine that runs steps elsewhere.
+            const value = await def.run(JSON.parse(JSON.stringify(input)) as I, this.deps.env);
+            const text = JSON.stringify(value);
+            if (text === undefined) throw new Error(`${name}: result is not JSON-serializable`);
             // The effect happened, but the process dies before the result is recorded.
             if (this.faults.crashAfter.delete(name)) throw new SimulatedCrash();
-            run.journal.set(name, value);
-            return value;
+            run.journal.set(name, text);
+            return JSON.parse(text) as O;
           } catch (err) {
             if (err instanceof SimulatedCrash) throw err;
             lastError = err;
@@ -172,7 +185,8 @@ export class ReferenceEngine {
 
       waitForApproval: async (stepName: string, proposalHash: string): Promise<ApprovalOutcome> => {
         const key = `approval:${stepName}`;
-        if (run.journal.has(key)) return run.journal.get(key) as ApprovalOutcome;
+        const recordedDecision = run.journal.get(key);
+        if (recordedDecision !== undefined) return JSON.parse(recordedDecision) as ApprovalOutcome;
         if (run.cancelRequested) throw new CancelledSignal();
         const res = await this.deps.approvals.resolve({
           runId: run.id,
@@ -180,7 +194,7 @@ export class ReferenceEngine {
           currentProposalHash: proposalHash,
         });
         if (res.status === 'pending') throw new Suspend();
-        run.journal.set(key, res.status);
+        run.journal.set(key, JSON.stringify(res.status));
         return res.status;
       },
     };
