@@ -13,7 +13,8 @@
   "dependencies": {
     "@fastify/cors": "^11.3.1",
     "@littleboss/shared": "workspace:*",
-    "fastify": "^5.12.7"
+    "fastify": "^5.12.7",
+    "inngest": "^4.24.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
