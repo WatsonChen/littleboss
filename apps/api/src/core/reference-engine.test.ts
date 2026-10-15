@@ -45,7 +45,7 @@ function makeReferenceHarness(): EngineHarness {
     },
     restart: () => engine.recoverAll(),
     cancel: (runId) => engine.cancel(runId),
-    getRun: (runId) => engine.view(runId),
+    getRun: async (runId) => engine.view(runId),
     setLiveConfig(next) {
       // Mutate in place: an engine that keeps a reference instead of a frozen copy would leak this.
       Object.assign(live, next);
@@ -54,7 +54,8 @@ function makeReferenceHarness(): EngineHarness {
       crashBefore: (step) => void engine.faults.crashBefore.add(step),
       crashAfter: (step) => void engine.faults.crashAfter.add(step),
       failAttempts: (step, times) => void engine.faults.failAttempts.set(step, times),
-      onStepStart: (step, cb) => void engine.faults.onStepStart.set(step, cb),
+      cancelWhenStepStarts: (step) =>
+        void engine.faults.onStepStart.set(step, (runId) => void engine.cancel(runId)),
     },
   };
 }

@@ -20,14 +20,15 @@ export interface EngineHarness {
   /** Simulate the process dying and coming back; unfinished runs must resume. */
   restart(): Promise<void>;
   cancel(runId: string): Promise<void>;
-  getRun(runId: string): RunView;
+  getRun(runId: string): Promise<RunView>;
   /** Change the live role/model settings after runs have already started. */
-  setLiveConfig(next: { roleVersion: string; model: string }): void;
+  setLiveConfig(next: { roleVersion: string; model: string }): void | Promise<void>;
   inject: {
-    crashBefore(step: string): void;
-    crashAfter(step: string): void;
-    failAttempts(step: string, times: number): void;
-    onStepStart(step: string, cb: (runId: string) => void): void;
+    crashBefore(step: string): void | Promise<void>;
+    crashAfter(step: string): void | Promise<void>;
+    failAttempts(step: string, times: number): void | Promise<void>;
+    /** Cancel the run the moment this step starts (i.e. while it is in flight). */
+    cancelWhenStepStarts(step: string): void | Promise<void>;
   };
 }
 
@@ -39,11 +40,11 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
     it('happy path: waits for approval, writes once, notifies', async () => {
       const h = makeHarness();
       await h.startRun('r1', input);
-      expect(h.getRun('r1').state).toBe('waiting_approval');
+      expect((await h.getRun('r1')).state).toBe('waiting_approval');
       expect(h.external.writeCalls).toBe(0);
 
       await h.submitApproval('r1', 'approved');
-      const run = h.getRun('r1');
+      const run = await h.getRun('r1');
       expect(run.state).toBe('succeeded');
       expect(run.completedSteps).toContain('notify');
       expect(h.external.effects).toBe(1);
@@ -56,20 +57,20 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
       await h.submitApproval('r1', 'approved');
       await h.startRun('r1', input);
       expect(h.external.effects).toBe(1);
-      expect(h.getRun('r1').stepExecutions['prepare']).toBe(1);
+      expect((await h.getRun('r1')).stepExecutions['prepare']).toBe(1);
     });
 
     // F1: restart mid-run
     it('F1: resumes after a restart without redoing completed steps', async () => {
       const h = makeHarness();
-      h.inject.crashBefore(WRITE_STEP);
+      await h.inject.crashBefore(WRITE_STEP);
       await h.startRun('r1', input);
       await h.submitApproval('r1', 'approved');
-      expect(h.getRun('r1').state).toBe('running');
+      expect((await h.getRun('r1')).state).toBe('running');
       expect(h.external.writeCalls).toBe(0);
 
       await h.restart();
-      const run = h.getRun('r1');
+      const run = await h.getRun('r1');
       expect(run.state).toBe('succeeded');
       expect(run.stepExecutions['prepare']).toBe(1);
       expect(run.stepExecutions[WRITE_STEP]).toBe(1);
@@ -79,13 +80,13 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
     // F1 + F8: the effect happened but the result was never recorded
     it('F1/F8: a crash after the external write still yields a single effect', async () => {
       const h = makeHarness();
-      h.inject.crashAfter(WRITE_STEP);
+      await h.inject.crashAfter(WRITE_STEP);
       await h.startRun('r1', input);
       await h.submitApproval('r1', 'approved');
       expect(h.external.effects).toBe(1);
 
       await h.restart();
-      const run = h.getRun('r1');
+      const run = await h.getRun('r1');
       expect(run.state).toBe('succeeded');
       expect(run.stepExecutions[WRITE_STEP]).toBe(2);
       expect(h.external.effects).toBe(1);
@@ -97,24 +98,24 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
       await h.startRun('r1', input);
       await h.restart();
       await h.restart();
-      expect(h.getRun('r1').state).toBe('waiting_approval');
+      expect((await h.getRun('r1')).state).toBe('waiting_approval');
 
       await h.submitApproval('r1', 'approved');
       await h.restart();
-      expect(h.getRun('r1').state).toBe('succeeded');
+      expect((await h.getRun('r1')).state).toBe('succeeded');
       expect(h.external.effects).toBe(1);
     });
 
     // F3: approval arrives before the run reaches its wait point
     it('F3: an approval that arrives early is not lost', async () => {
       const h = makeHarness();
-      h.inject.crashAfter('prepare');
+      await h.inject.crashAfter('prepare');
       await h.startRun('r1', input);
-      expect(h.getRun('r1').state).toBe('running');
+      expect((await h.getRun('r1')).state).toBe('running');
 
       expect(await h.submitApproval('r1', 'approved')).toBe('accepted');
       await h.restart();
-      expect(h.getRun('r1').state).toBe('succeeded');
+      expect((await h.getRun('r1')).state).toBe('succeeded');
       expect(h.external.effects).toBe(1);
     });
 
@@ -132,7 +133,7 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
       const h = makeHarness();
       await h.startRun('r1', input);
       await h.submitApproval('r1', 'approved', proposalHashFor({ ...input, title: '買火鍋料' }));
-      const run = h.getRun('r1');
+      const run = await h.getRun('r1');
       expect(run.state).toBe('needs_reapproval');
       expect(h.external.writeCalls).toBe(0);
     });
@@ -141,7 +142,7 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
       const h = makeHarness();
       await h.startRun('r1', input);
       await h.submitApproval('r1', 'rejected');
-      expect(h.getRun('r1').state).toBe('rejected');
+      expect((await h.getRun('r1')).state).toBe('rejected');
       expect(h.external.writeCalls).toBe(0);
     });
 
@@ -150,20 +151,20 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
       const h = makeHarness();
       await h.startRun('r1', input);
       await h.cancel('r1');
-      expect(h.getRun('r1').state).toBe('cancelled');
+      expect((await h.getRun('r1')).state).toBe('cancelled');
       await h.submitApproval('r1', 'approved');
       await h.restart();
-      expect(h.getRun('r1').state).toBe('cancelled');
+      expect((await h.getRun('r1')).state).toBe('cancelled');
       expect(h.external.writeCalls).toBe(0);
     });
 
     it('F6: cancelling during the write keeps the real effect visible and skips later steps', async () => {
       const h = makeHarness();
-      h.inject.onStepStart(WRITE_STEP, (runId) => void h.cancel(runId));
+      await h.inject.cancelWhenStepStarts(WRITE_STEP);
       await h.startRun('r1', input);
       await h.submitApproval('r1', 'approved');
 
-      const run = h.getRun('r1');
+      const run = await h.getRun('r1');
       expect(run.state).toBe('cancelled');
       expect(run.completedSteps).toContain(WRITE_STEP);
       expect(run.completedSteps).not.toContain('notify');
@@ -176,7 +177,7 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
       h.external.mode = 'ok_response_lost';
       await h.startRun('r1', input);
       await h.submitApproval('r1', 'approved');
-      const run = h.getRun('r1');
+      const run = await h.getRun('r1');
       expect(run.state).toBe('succeeded');
       expect(run.outcome).toMatchObject({ status: 'succeeded', verified: true });
       expect(h.external.writeCalls).toBe(1);
@@ -187,10 +188,10 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
       h.external.mode = 'lost_before_processing';
       await h.startRun('r1', input);
       await h.submitApproval('r1', 'approved');
-      expect(h.getRun('r1').state).toBe('unknown');
+      expect((await h.getRun('r1')).state).toBe('unknown');
 
       await h.restart();
-      expect(h.getRun('r1').state).toBe('unknown');
+      expect((await h.getRun('r1')).state).toBe('unknown');
       expect(h.external.writeCalls).toBe(1);
       expect(h.external.effects).toBe(0);
     });
@@ -199,11 +200,11 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
     it('F9: a run keeps the settings it started with', async () => {
       const h = makeHarness();
       await h.startRun('r1', input);
-      h.setLiveConfig({ roleVersion: 'v2', model: 'other-model' });
+      await h.setLiveConfig({ roleVersion: 'v2', model: 'other-model' });
       await h.restart();
       await h.submitApproval('r1', 'approved');
 
-      const run = h.getRun('r1');
+      const run = await h.getRun('r1');
       expect(run.config.roleVersion).toBe('v1');
       expect(run.outcome).toMatchObject({ status: 'succeeded', roleVersion: 'v1' });
     });
@@ -211,10 +212,10 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
     // F10: bounded retries
     it('F10: retries a failing step within the limit and still writes once', async () => {
       const h = makeHarness();
-      h.inject.failAttempts(WRITE_STEP, 2); // maxRetries is 2, so the third attempt runs
+      await h.inject.failAttempts(WRITE_STEP, 2); // maxRetries is 2, so the third attempt runs
       await h.startRun('r1', input);
       await h.submitApproval('r1', 'approved');
-      const run = h.getRun('r1');
+      const run = await h.getRun('r1');
       expect(run.state).toBe('succeeded');
       expect(run.stepExecutions[WRITE_STEP]).toBe(3);
       expect(h.external.effects).toBe(1);
@@ -222,15 +223,15 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
 
     it('F10: stops after the retry limit and reports failure', async () => {
       const h = makeHarness();
-      h.inject.failAttempts(WRITE_STEP, 10);
+      await h.inject.failAttempts(WRITE_STEP, 10);
       await h.startRun('r1', input);
       await h.submitApproval('r1', 'approved');
-      const run = h.getRun('r1');
+      const run = await h.getRun('r1');
       expect(run.state).toBe('failed');
       expect(run.stepExecutions[WRITE_STEP]).toBe(3);
       expect(h.external.effects).toBe(0);
       await h.restart();
-      expect(h.getRun('r1').state).toBe('failed');
+      expect((await h.getRun('r1')).state).toBe('failed');
     });
 
     // F11: long wait (simulated by many restarts)
@@ -239,12 +240,12 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
       await h.startRun('r1', input);
       for (let i = 0; i < 100; i += 1) await h.restart();
 
-      const waiting = h.getRun('r1');
+      const waiting = await h.getRun('r1');
       expect(waiting.state).toBe('waiting_approval');
       expect(waiting.stepExecutions['prepare']).toBe(1);
 
       await h.submitApproval('r1', 'approved');
-      expect(h.getRun('r1').state).toBe('succeeded');
+      expect((await h.getRun('r1')).state).toBe('succeeded');
       expect(h.external.effects).toBe(1);
     });
 
@@ -253,8 +254,8 @@ export function runEngineContract(name: string, makeHarness: () => EngineHarness
       await h.startRun('a', input);
       await h.startRun('b', { ...input, title: '買火鍋料' });
       await h.submitApproval('a', 'approved');
-      expect(h.getRun('a').state).toBe('succeeded');
-      expect(h.getRun('b').state).toBe('waiting_approval');
+      expect((await h.getRun('a')).state).toBe('succeeded');
+      expect((await h.getRun('b')).state).toBe('waiting_approval');
       expect(h.external.effects).toBe(1);
     });
   });
