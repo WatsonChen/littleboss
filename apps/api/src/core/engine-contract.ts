@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { SubmitResult } from './approval.js';
 import type { FakeExternalService } from './fake-external.js';
-import { APPROVAL_STEP, WRITE_STEP, proposalHashFor, type CalendarWriteInput } from './flow.js';
+import { APPROVAL_STEP, WRITE_STEP, type CalendarWriteInput } from './flow.js';
+import { proposalHashFor } from './proposal.js';
 import type { RunView } from './reference-engine.js';
 
 /**

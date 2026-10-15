@@ -5,6 +5,8 @@ import type {
   FlowOutcome,
   RunConfig,
   StepDef,
+  AnyStepDef,
+  StepRef,
   StepEnv,
 } from './flow.js';
 
@@ -65,7 +67,18 @@ export class ReferenceEngine {
     onStepStart: new Map<string, (runId: string) => void>(),
   };
 
-  constructor(private readonly deps: { approvals: ApprovalService; flow: Flow; env: StepEnv }) {}
+  private readonly steps: Map<string, AnyStepDef>;
+
+  constructor(
+    private readonly deps: {
+      approvals: ApprovalService;
+      flow: Flow;
+      env: StepEnv;
+      steps: readonly AnyStepDef[];
+    },
+  ) {
+    this.steps = new Map(deps.steps.map((s) => [s.name, s]));
+  }
 
   /** Idempotent: starting an existing run id returns the existing run. Config is frozen here. */
   async startRun(runId: string, config: RunConfig, input: unknown): Promise<void> {
@@ -148,8 +161,10 @@ export class ReferenceEngine {
       runId: run.id,
       config: run.config,
 
-      step: async <I, O>(def: StepDef<I, O>, input: I): Promise<O> => {
-        const name = def.name;
+      step: async <I, O>(ref: StepRef<I, O>, input: I): Promise<O> => {
+        const name = ref.name;
+        const def = this.steps.get(name) as StepDef<I, O> | undefined;
+        if (!def) throw new Error(`unregistered step ${name}`);
         const recorded = run.journal.get(name);
         if (recorded !== undefined) return JSON.parse(recorded) as O;
         if (run.cancelRequested) throw new CancelledSignal();

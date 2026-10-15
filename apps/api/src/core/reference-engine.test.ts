@@ -2,15 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { ApprovalService, InMemoryApprovalRepository } from './approval.js';
 import { runEngineContract, type EngineHarness } from './engine-contract.js';
 import { FakeExternalService } from './fake-external.js';
+import { calendarSteps } from './flow-steps.js';
+import { proposalHashFor } from './proposal.js';
 import {
   APPROVAL_STEP,
   calendarWriteFlow,
-  proposalHashFor,
   type CalendarWriteInput,
   type FlowContext,
   type FlowOutcome,
   type RunConfig,
   type StepDef,
+  type AnyStepDef,
 } from './flow.js';
 import { ReferenceEngine } from './reference-engine.js';
 
@@ -21,6 +23,7 @@ function makeReferenceHarness(): EngineHarness {
     approvals,
     flow: (ctx, input) => calendarWriteFlow(ctx, input as CalendarWriteInput),
     env: { external },
+    steps: calendarSteps,
   });
   const inputs = new Map<string, CalendarWriteInput>();
   const live: RunConfig = { roleVersion: 'v1', model: 'm1', maxRetries: 2 };
@@ -63,20 +66,27 @@ function makeReferenceHarness(): EngineHarness {
 runEngineContract('reference engine (in-memory)', makeReferenceHarness);
 
 describe('reference engine: step data rules', () => {
-  const makeEngine = (flow: (ctx: FlowContext) => Promise<FlowOutcome>) =>
+  const makeEngine = (
+    flow: (ctx: FlowContext) => Promise<FlowOutcome>,
+    steps: readonly AnyStepDef[] = [],
+  ) =>
     new ReferenceEngine({
       approvals: new ApprovalService(new InMemoryApprovalRepository()),
       flow: (ctx) => flow(ctx),
       env: { external: new FakeExternalService() },
+      steps,
     });
   const config: RunConfig = { roleVersion: 'v1', model: 'm1', maxRetries: 0 };
 
   it('fails a run whose step result cannot be serialized', async () => {
     const bad: StepDef<null, unknown> = { name: 'bad', run: async () => undefined };
-    const engine = makeEngine(async (ctx) => {
-      await ctx.step(bad, null);
-      return { status: 'rejected' };
-    });
+    const engine = makeEngine(
+      async (ctx) => {
+        await ctx.step(bad, null);
+        return { status: 'rejected' };
+      },
+      [bad as AnyStepDef],
+    );
     await engine.startRun('r1', config, null);
     const view = engine.view('r1');
     expect(view.state).toBe('failed');
@@ -89,11 +99,14 @@ describe('reference engine: step data rules', () => {
       run: async () => ({ at: new Date(0) }),
     };
     const seen: unknown[] = [];
-    const engine = makeEngine(async (ctx) => {
-      seen.push((await ctx.step(stamp, null)).at);
-      await ctx.waitForApproval('gate', 'h');
-      return { status: 'rejected' };
-    });
+    const engine = makeEngine(
+      async (ctx) => {
+        seen.push((await ctx.step(stamp, null)).at);
+        await ctx.waitForApproval('gate', 'h');
+        return { status: 'rejected' };
+      },
+      [stamp as AnyStepDef],
+    );
     await engine.startRun('r1', config, null);
     await engine.recoverAll();
     expect(seen).toHaveLength(2);
