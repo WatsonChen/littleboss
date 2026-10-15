@@ -1,6 +1,9 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import { serve } from 'inngest/fastify';
 import { HealthResponse } from '@littleboss/shared';
+import { inngest } from './inngest/client.js';
+import { functions } from './inngest/functions.js';
 
 export function buildApp() {
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test' });
@@ -19,6 +22,13 @@ export function buildApp() {
       time: new Date().toISOString(),
     };
     return HealthResponse.parse(body);
+  });
+
+  // Inngest calls this endpoint to sync and to run steps; requests are verified with the signing key.
+  app.route({
+    method: ['GET', 'POST', 'PUT'],
+    url: '/api/inngest',
+    handler: serve({ client: inngest, functions }),
   });
 
   return app;
