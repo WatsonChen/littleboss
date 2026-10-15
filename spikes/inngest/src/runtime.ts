@@ -60,6 +60,50 @@ export const view = {
       [runId, workflowRunId],
     );
   },
+  /** Remember Inngest's own id for the start event (the first send wins; a duplicate send is a no-op). */
+  async attachEngineEvent(runId: string, engineEventId: string) {
+    await db().query(
+      `update spike_run_view set engine_event_id=$2, updated_at=clock_timestamp()
+       where run_id=$1 and engine_event_id is null`,
+      [runId, engineEventId],
+    );
+  },
+  /**
+   * The engine gave up on the run (retries exhausted, or it is gone). Only an active run can be
+   * closed this way, so a run that already finished or was cancelled keeps its real outcome.
+   * If the external write was attempted we cannot claim it failed: the effect may exist.
+   */
+  async markEngineFailure(runId: string, reason: string): Promise<boolean> {
+    const { rows } = await db().query(
+      `update spike_run_view
+          set state = case when step_executions ? 'write-calendar' then 'unknown' else 'failed' end,
+              outcome = jsonb_build_object(
+                'status', case when step_executions ? 'write-calendar' then 'unknown' else 'failed' end,
+                'reason', $2::text),
+              updated_at = clock_timestamp()
+        where run_id=$1 and state in ('running','waiting_approval')
+        returning run_id`,
+      [runId, reason],
+    );
+    return rows.length > 0;
+  },
+  /** Active runs that nobody has checked against the engine for `olderThanMs`. */
+  async listToReconcile(olderThanMs: number) {
+    const { rows } = await db().query(
+      `select run_id, engine_event_id from spike_run_view
+        where state in ('running','waiting_approval')
+          and coalesce(reconciled_at, updated_at) < clock_timestamp() - ($1::int * interval '1 millisecond')
+        order by coalesce(reconciled_at, updated_at)
+        limit 200`,
+      [olderThanMs],
+    );
+    return rows as { run_id: string; engine_event_id: string | null }[];
+  },
+  async touchReconciled(runId: string) {
+    await db().query('update spike_run_view set reconciled_at=clock_timestamp() where run_id=$1', [
+      runId,
+    ]);
+  },
   /** Only moves between active states, so a finished or cancelled run is never revived. */
   async setActiveState(runId: string, state: 'running' | 'waiting_approval') {
     await db().query(
@@ -111,4 +155,6 @@ export const faults = {
   crashAfter: new Set<string>(),
   failAttempts: new Map<string, number>(),
   cancelWhenStepStarts: new Set<string>(),
+  /** Number of upcoming attempts at the final `finish` step that fail. */
+  failFinish: 0,
 };

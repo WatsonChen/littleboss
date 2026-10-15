@@ -7,6 +7,8 @@ import {
   type RunConfig,
 } from '../../../apps/api/src/core/flow';
 import { EVENTS, inngest } from './client';
+import { reconcileRuns, inngestRestClient } from './reconcile';
+import { view } from './runtime';
 import { checkApproval, finishRun, runNamedStep, setActiveState } from './steps';
 
 // How long one wait lasts before we look at our own database again. A decision sent before the
@@ -19,6 +21,15 @@ export const calendarFn = inngest.createFunction(
     triggers: [{ event: EVENTS.start }],
     retries: 2, // 2 retries = 3 attempts in total
     cancelOn: [{ event: EVENTS.cancel, match: 'data.runId' }],
+    // First line of defence: when the engine gives up on a run while our app can still be reached
+    // (for example the last step keeps failing), close the run in our own records. If the app is
+    // down at that moment the engine's attempts to run this handler fail too and it is not tried
+    // again, so that case is left to `reconcileFn`.
+    onFailure: async ({ event, step }) => {
+      const original = event.data.event.data as { runId: string };
+      const reason = `the engine gave up: ${event.data.error?.message ?? 'unknown error'}`;
+      await step.run('close-run', () => view.markEngineFailure(original.runId, reason));
+    },
   },
   async ({ event, step }) => {
     const { runId, input, config } = event.data as {
@@ -61,4 +72,10 @@ export const calendarFn = inngest.createFunction(
     await step.run('finish', () => finishRun(runId, outcome));
     return outcome;
   },
+);
+
+/** Second line of defence, on a schedule: closes runs the engine has already ended. */
+export const reconcileFn = inngest.createFunction(
+  { id: 'reconcile-runs', triggers: [{ cron: '*/5 * * * *' }], retries: 2 },
+  async ({ step }) => step.run('reconcile', () => reconcileRuns(inngestRestClient())),
 );
