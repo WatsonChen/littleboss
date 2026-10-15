@@ -4,6 +4,7 @@ import {
   CreateThreadRequest,
   EditMessageRequest,
   EstimateRequest,
+  RenameThreadRequest,
   SaveConclusionRequest,
   SendMessageRequest,
 } from '@littleboss/shared';
@@ -62,6 +63,12 @@ export function registerDiscussionRoutes(
       const thread = await getService().createThread(parse(CreateThreadRequest, req.body ?? {}));
       return reply.status(201).send({ thread });
     });
+    api.patch('/api/threads/:id', async (req) => ({
+      thread: await getService().renameThread(
+        id(req.params),
+        parse(RenameThreadRequest, req.body).title,
+      ),
+    }));
     api.get('/api/threads/:id', async (req) => getService().getThread(id(req.params)));
 
     api.post('/api/threads/:id/estimate', async (req) =>

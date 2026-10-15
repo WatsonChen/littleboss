@@ -347,6 +347,14 @@ describe.skipIf(!TEST_DATABASE_URL)('discussion service (real Postgres)', () => 
     }
   });
 
+  it('a discussion can be renamed', async () => {
+    const t = await kit.service.renameThread(threadId, '  客戶提案  ');
+    expect(t.title).toBe('客戶提案');
+    await expect(
+      kit.service.renameThread('00000000-0000-4000-8000-000000000000', 'x'),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
   it('closing and reopening: everything is still there, in order', async () => {
     await setup({ anthropic: () => ok('甲') });
     await kit.service.send(threadId, { clientRequestId: rid(), kind: 'context', content: '背景' });
@@ -387,6 +395,28 @@ describe.skipIf(!TEST_DATABASE_URL)('discussion service (real Postgres)', () => 
     expect(agentMsgs(r.messages).map((m) => m.estimatedCostMicro)).toEqual(
       est.calls.map((c) => c.estimatedCostMicro),
     );
+  });
+
+  it('estimate for a review matches the send, so the confirmed amount is accepted', async () => {
+    await setup({ anthropic: () => ok('初稿'), openai: () => ok('意見') });
+    await kit.service.send(threadId, {
+      clientRequestId: rid(),
+      kind: 'user',
+      content: '@claude 提案',
+    });
+    await kit.dispatcher.idle();
+    const proposal = agentMsgs((await kit.service.getThread(threadId)).messages)[0]!;
+    const body = { content: '@gpt 請檢查上面這則回覆', replyToId: proposal.id };
+    const est = await kit.service.estimate(threadId, body);
+    const withoutTarget = await kit.service.estimate(threadId, { content: body.content });
+    expect(est.totalMicro).not.toBe(withoutTarget.totalMicro);
+    const r = await kit.service.send(threadId, {
+      clientRequestId: rid(),
+      kind: 'user',
+      ...body,
+      acceptedMaxCostMicro: est.totalMicro,
+    });
+    expect(agentMsgs(r.messages)[0]!.estimatedCostMicro).toBe(est.totalMicro);
   });
 
   it('refuses to send when the cost grew past what the person confirmed', async () => {

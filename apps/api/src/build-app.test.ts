@@ -59,3 +59,25 @@ describe('GET /health/db', () => {
     await app.close();
   });
 });
+
+describe('browser preflight', () => {
+  it.each(['GET', 'POST', 'PATCH'])(
+    'lets the web app send %s with its auth header',
+    async (method) => {
+      const app = buildApp();
+      const res = await app.inject({
+        method: 'OPTIONS',
+        url: '/api/threads',
+        headers: {
+          origin: 'http://localhost:5173',
+          'access-control-request-method': method,
+          'access-control-request-headers': 'authorization,content-type',
+        },
+      });
+      expect(res.statusCode).toBe(204);
+      expect(res.headers['access-control-allow-methods']).toContain(method);
+      expect(res.headers['access-control-allow-headers']).toMatch(/authorization/i);
+      await app.close();
+    },
+  );
+});

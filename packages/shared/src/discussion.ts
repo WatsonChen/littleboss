@@ -78,12 +78,17 @@ export const CreateThreadRequest = z.object({
 });
 export type CreateThreadRequest = z.infer<typeof CreateThreadRequest>;
 
+export const RenameThreadRequest = z.object({ title: z.string().trim().min(1).max(120) });
+export type RenameThreadRequest = z.infer<typeof RenameThreadRequest>;
+
 const content = z.string().trim().min(1).max(60_000);
 
 export const EstimateRequest = z.object({
   content,
   /** Explicit targets; when absent they are read from @mentions in `content`. */
   mentions: z.array(AgentId).max(3).optional(),
+  /** Same as in SendMessageRequest: the review target changes what is sent, so it changes the estimate. */
+  replyToId: z.string().uuid().optional(),
 });
 export type EstimateRequest = z.infer<typeof EstimateRequest>;
 

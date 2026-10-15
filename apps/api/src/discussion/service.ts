@@ -92,14 +92,24 @@ export class DiscussionService {
     );
   }
 
+  async renameThread(id: string, title: string): Promise<ThreadSummary> {
+    if (!(await this.repo.renameThread(id, title.trim()))) {
+      throw new HttpError(404, 'thread_not_found', 'No such discussion.');
+    }
+    return (await this.repo.getThread(id))!;
+  }
+
   listThreads(): Promise<ThreadSummary[]> {
     return this.repo.listThreads();
   }
 
   async getThread(id: string): Promise<ThreadDetail> {
+    // Messages first: if a call finishes in between, the summary is the newer of the two and the
+    // screen keeps polling until they agree. The other order could show a finished call next to a
+    // total that still counts its estimate, with nothing left to trigger a refresh.
+    const messages = await this.repo.listMessages(id);
     const thread = await this.repo.getThread(id);
     if (!thread) throw new HttpError(404, 'thread_not_found', 'No such discussion.');
-    const messages = await this.repo.listMessages(id);
     return { thread, messages: messages.map(toView), agents: this.agents() };
   }
 
@@ -181,7 +191,7 @@ export class DiscussionService {
     const thread = await this.repo.getThread(threadId);
     if (!thread) throw new HttpError(404, 'thread_not_found', 'No such discussion.');
     const visible = this.visibleTo(await this.repo.listMessages(threadId));
-    const calls = this.plan(visible, req.content, this.targetsOf(req), undefined);
+    const calls = this.plan(visible, req.content, this.targetsOf(req), req.replyToId);
     const totalMicro = calls.reduce((s, c) => s + c.estimatedCostMicro, 0);
     return {
       calls: calls.map((c) => ({

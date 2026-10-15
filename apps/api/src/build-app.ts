@@ -25,7 +25,11 @@ export function buildApp(opts: BuildAppOptions = {}) {
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean);
-  void app.register(cors, { origin: origins });
+  void app.register(cors, {
+    origin: origins,
+    methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['content-type', 'authorization'],
+  });
 
   app.get('/health', async () => {
     const body: HealthResponse = {

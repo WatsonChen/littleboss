@@ -320,6 +320,14 @@ export class DiscussionRepository {
     }));
   }
 
+  async renameThread(id: string, title: string): Promise<boolean> {
+    const { rowCount } = await this.pool.query(`update threads set title=$2 where id=$1`, [
+      id,
+      title,
+    ]);
+    return (rowCount ?? 0) > 0;
+  }
+
   listThreads(): Promise<ThreadSummary[]> {
     return this.threadSummaries('', []);
   }
