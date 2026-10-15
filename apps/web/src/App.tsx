@@ -1,29 +1,50 @@
-import { useEffect, useState } from 'react';
-import { fetchHealth } from './api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createApiClient } from './api';
+import { getToken, setToken } from './lib/auth';
+import { Room } from './views/Room';
+import { ThreadList } from './views/ThreadList';
+import { TokenGate } from './views/TokenGate';
 
-type State =
-  { kind: 'loading' } | { kind: 'ok'; time: string } | { kind: 'error'; message: string };
+const ROOM = /^#\/t\/([0-9a-f-]{36})$/i;
+
+function useHash() {
+  const [hash, setHash] = useState(location.hash);
+  useEffect(() => {
+    const on = () => setHash(location.hash);
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
+  return hash;
+}
 
 export function App() {
-  const [state, setState] = useState<State>({ kind: 'loading' });
+  const hash = useHash();
+  const [locked, setLocked] = useState(false);
+  const [triedToken, setTriedToken] = useState(false);
+  // Changing the key remounts the screens so they load again with the new password.
+  const [epoch, setEpoch] = useState(0);
 
-  useEffect(() => {
-    fetchHealth()
-      .then((h) => setState({ kind: 'ok', time: h.time }))
-      .catch((e: unknown) =>
-        setState({ kind: 'error', message: e instanceof Error ? e.message : String(e) }),
-      );
-  }, []);
+  const onUnauthorized = useCallback(() => setLocked(true), []);
+  const client = useMemo(() => createApiClient({ getToken, onUnauthorized }), [onUnauthorized]);
 
-  return (
-    <main style={{ padding: 'var(--space)' }}>
-      <h1>little boss</h1>
-      <p>
-        後端狀態：
-        {state.kind === 'loading' && '檢查中…'}
-        {state.kind === 'ok' && `正常（${state.time}）`}
-        {state.kind === 'error' && `無法連線：${state.message}`}
-      </p>
-    </main>
+  if (locked) {
+    return (
+      <TokenGate
+        wrong={triedToken}
+        onSubmit={(t) => {
+          setToken(t);
+          setTriedToken(true);
+          setLocked(false);
+          setEpoch((e) => e + 1);
+        }}
+      />
+    );
+  }
+
+  const room = ROOM.exec(hash);
+  return room ? (
+    <Room key={`${room[1]}-${epoch}`} client={client} threadId={room[1]!} />
+  ) : (
+    <ThreadList key={epoch} client={client} />
   );
 }
