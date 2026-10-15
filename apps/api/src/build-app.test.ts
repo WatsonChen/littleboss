@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { HealthResponse } from '@littleboss/shared';
-import { buildApp } from './app.js';
+import { buildApp } from './build-app.js';
 
 describe('GET /health', () => {
   it('returns a body that matches the shared contract', async () => {

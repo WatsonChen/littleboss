@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/server.ts'],
+  entry: { main: 'src/main.ts', vercel: 'src/vercel.ts' },
   format: ['esm'],
   target: 'node22',
   clean: true,
