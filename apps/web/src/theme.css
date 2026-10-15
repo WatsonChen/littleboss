@@ -1,0 +1,28 @@
+/* Design tokens from the brand concept. Peach (--accent) is a fill, never text on cream:
+   its contrast against --bg is about 1.8:1. Use --text on peach instead (about 7.7:1). */
+:root {
+  --brand: #45334f;
+  --accent: #f2ab83;
+  --bg: #faf7f2;
+  --aux: #e8e1ed;
+  --text: #29272d;
+  --on-brand: #ffffff;
+
+  --font-sans: 'Inter', 'Noto Sans TC', system-ui, -apple-system, 'PingFang TC', sans-serif;
+  --radius: 14px;
+  --space: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  /* keep content clear of the iPhone notch and home indicator when installed as a PWA */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+}

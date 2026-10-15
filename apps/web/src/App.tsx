@@ -16,7 +16,7 @@ export function App() {
   }, []);
 
   return (
-    <main style={{ fontFamily: 'system-ui', padding: 16 }}>
+    <main style={{ padding: 'var(--space)' }}>
       <h1>little boss</h1>
       <p>
         後端狀態：
