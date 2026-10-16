@@ -21,9 +21,21 @@ packages/shared  共用契約：型別、zod 驗證、列舉（不含執行邏�
 
 ```bash
 pnpm install
-cp .env.example apps/api/.env   # 填入自己的值；不要提交
+cp .env.example apps/api/.env   # 填入自己的值；不要提交（`pnpm dev:api` 會自動讀取）
+pnpm --filter @littleboss/api db:migrate   # 第一次，或有新的 migration 時
 pnpm dev:api                    # http://localhost:8787/health
-pnpm dev:web
+pnpm dev:web                    # http://localhost:5173
+```
+
+本地至少要在 `apps/api/.env` 設 `DATABASE_URL`（建議用另一個 Neon branch 或本地 Postgres，不要連正式資料庫）。
+不想花錢、也不想申請金鑰時，加上 `LB_FAKE_PROVIDERS=1`：三位 AI 都會回標示清楚的示範回覆。
+本地沒設 `ACCESS_TOKEN` 就不需要登入。需要 Node 22.9 以上（讀取 `.env` 用 `--env-file-if-exists`）。
+
+本地 Postgres 範例：
+
+```bash
+docker run -d --name lb-pg -p 5432:5432 -e POSTGRES_USER=littleboss -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=littleboss postgres:16
+# DATABASE_URL=postgres://littleboss:dev@localhost:5432/littleboss
 ```
 
 檢查（CI 跑同一組）：

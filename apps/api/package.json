@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
     "build": "tsup",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "db:migrate": "tsx src/db/migrate-cli.ts",
+    "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate-cli.ts",
     "vercel-build": "tsup && tsx src/db/migrate-on-deploy.ts"
   },
   "dependencies": {
