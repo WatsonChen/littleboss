@@ -67,7 +67,8 @@ export function HandoffSheet(props: {
   return (
     <Sheet title="交給 AI" onClose={props.onClose}>
       <p>
-        <strong>{props.conclusion.title}</strong> <span className="chip">v{props.conclusion.version}</span>
+        <strong>{props.conclusion.title}</strong>{' '}
+        <span className="chip">v{props.conclusion.version}</span>
       </p>
       {hired.length === 0 ? (
         <p className="error-text">目前沒有可用的 AI，請先設定 API 金鑰。</p>
@@ -94,7 +95,8 @@ export function HandoffSheet(props: {
             />
           </label>
           <p className="muted small">
-            流程：AI 先起草 → 你把草稿帶去用，再把結果貼回來 → AI 修訂 → 你核准後才存成成品。會呼叫 AI 兩次，費用算進這個討論的預算。
+            流程：AI 先起草 → 你把草稿帶去用，再把結果貼回來 → AI 修訂 → 你核准後才存成成品。會呼叫
+            AI 兩次，費用算進這個討論的預算。
           </p>
         </>
       )}
@@ -191,7 +193,10 @@ function RunDetail(props: { client: ApiClient; run: RunView; onChanged(): Promis
               disabled={busy}
               onClick={() =>
                 void act(() =>
-                  client.submitRunInput(run.id, { stepName: pending.stepName, text: '（沒有要補充）' }),
+                  client.submitRunInput(run.id, {
+                    stepName: pending.stepName,
+                    text: '（沒有要補充）',
+                  }),
                 )
               }
             >

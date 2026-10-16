@@ -1,10 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import {
-  CreateRunRequest,
-  SubmitApprovalRequest,
-  SubmitInputRequest,
-} from '@littleboss/shared';
+import { CreateRunRequest, SubmitApprovalRequest, SubmitInputRequest } from '@littleboss/shared';
 import { HttpError } from '../discussion/errors.js';
 import type { RunService } from './service.js';
 
@@ -43,5 +39,7 @@ export function registerRunRoutes(api: FastifyInstance, getService: () => RunSer
   api.post('/api/runs/:id/approval', async (req) =>
     getService().submitApproval(id(req.params), parse(SubmitApprovalRequest, req.body)),
   );
-  api.post('/api/runs/:id/cancel', async (req) => ({ run: await getService().cancel(id(req.params)) }));
+  api.post('/api/runs/:id/cancel', async (req) => ({
+    run: await getService().cancel(id(req.params)),
+  }));
 }

@@ -43,7 +43,12 @@ export function App() {
 
   const room = ROOM.exec(hash);
   return room ? (
-    <Room key={`${room[1]}-${room[2] ?? ''}-${epoch}`} client={client} threadId={room[1]!} openRunId={room[2] ?? null} />
+    <Room
+      key={`${room[1]}-${room[2] ?? ''}-${epoch}`}
+      client={client}
+      threadId={room[1]!}
+      openRunId={room[2] ?? null}
+    />
   ) : (
     <ThreadList key={epoch} client={client} />
   );

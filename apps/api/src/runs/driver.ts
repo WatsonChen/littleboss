@@ -109,7 +109,11 @@ export class RunDriver {
 
     const ctx: HandoffContext = {
       runId: run.id,
-      config: { roleVersion: run.config.roleVersion, model: run.config.model, maxRetries: run.config.maxRetries },
+      config: {
+        roleVersion: run.config.roleVersion,
+        model: run.config.model,
+        maxRetries: run.config.maxRetries,
+      },
 
       step: async <I, O>(ref: StepRef<I, O>, input: I): Promise<O> => {
         const recorded = memo.get(ref.name);

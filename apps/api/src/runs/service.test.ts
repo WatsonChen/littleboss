@@ -46,14 +46,21 @@ describe.skipIf(!TEST_DATABASE_URL)('runs (real Postgres)', () => {
     await k.engine.idle();
     const waiting = await k.runs.get(started.run.id);
     expect(waiting.state).toBe('waiting_input');
-    expect(waiting.pending).toMatchObject({ kind: 'input', stepName: 'human-return', draft: DRAFT_TEXT });
+    expect(waiting.pending).toMatchObject({
+      kind: 'input',
+      stepName: 'human-return',
+      draft: DRAFT_TEXT,
+    });
     expect(waiting.steps.map((s) => [s.name, s.status])).toEqual([
       ['draft', 'done'],
       ['human-return', 'waiting'],
     ]);
     expect(waiting.config).toMatchObject({ agentId: 'claude', roleVersion: '1' });
 
-    const sent = await k.runs.submitInput(waiting.id, { stepName: 'human-return', text: '加上午餐' });
+    const sent = await k.runs.submitInput(waiting.id, {
+      stepName: 'human-return',
+      text: '加上午餐',
+    });
     expect(sent.accepted).toBe(true);
     await k.engine.idle();
     const approval = await k.runs.get(waiting.id);
@@ -90,7 +97,9 @@ describe.skipIf(!TEST_DATABASE_URL)('runs (real Postgres)', () => {
     const deliverable = assets.find((a) => a.kind === 'deliverable')!;
     expect(deliverable).toMatchObject({ content: FINAL_TEXT, version: 1, title: '週末行程' });
     expect(assets.filter((a) => a.kind === 'conclusion')).toHaveLength(1);
-    const { rows } = await k.pool.query(`select source_asset_id from assets where id=$1`, [deliverable.assetId]);
+    const { rows } = await k.pool.query(`select source_asset_id from assets where id=$1`, [
+      deliverable.assetId,
+    ]);
     expect(rows[0].source_asset_id).toBe(k.conclusion.assetId);
     // The thread's total counts what the run really spent.
     expect((await k.service.getThread(k.threadId)).thread.spentMicro).toBe(2 * COST_PER_CALL);
@@ -104,7 +113,7 @@ describe.skipIf(!TEST_DATABASE_URL)('runs (real Postgres)', () => {
     expect(b.deduplicated).toBe(true);
     expect(b.run.id).toBe(a.run.id);
     expect(calls()).toBe(1);
-    expect((await k.runs.listForThread(k.threadId))).toHaveLength(1);
+    expect(await k.runs.listForThread(k.threadId)).toHaveLength(1);
   });
 
   it('a second answer from the person is reported as already processed and changes nothing', async () => {
@@ -133,7 +142,9 @@ describe.skipIf(!TEST_DATABASE_URL)('runs (real Postgres)', () => {
     const again = await k.runs.submitApproval(r.id, { ...body, decision: 'approved' });
     expect(again.accepted).toBe(false);
     const done = await k.runs.get(r.id);
-    const { rows } = await k.pool.query(`select count(*)::int as n from assets where run_id=$1`, [r.id]);
+    const { rows } = await k.pool.query(`select count(*)::int as n from assets where run_id=$1`, [
+      r.id,
+    ]);
     expect(rows[0].n).toBe(done.state === 'succeeded' ? 1 : 0);
     expect(['succeeded', 'rejected']).toContain(done.state);
   });
@@ -141,11 +152,17 @@ describe.skipIf(!TEST_DATABASE_URL)('runs (real Postgres)', () => {
   it('a rejection ends the run and saves nothing', async () => {
     const r = await reachApproval();
     const hash = hashOf(r);
-    await k.runs.submitApproval(r.id, { stepName: 'approve-deliverable', proposalHash: hash, decision: 'rejected' });
+    await k.runs.submitApproval(r.id, {
+      stepName: 'approve-deliverable',
+      proposalHash: hash,
+      decision: 'rejected',
+    });
     await k.engine.idle();
     const done = await k.runs.get(r.id);
     expect(done.state).toBe('rejected');
-    const { rows } = await k.pool.query(`select count(*)::int as n from assets where run_id=$1`, [r.id]);
+    const { rows } = await k.pool.query(`select count(*)::int as n from assets where run_id=$1`, [
+      r.id,
+    ]);
     expect(rows[0].n).toBe(0);
   });
 
@@ -164,12 +181,19 @@ describe.skipIf(!TEST_DATABASE_URL)('runs (real Postgres)', () => {
   it('a decision stored for different content makes the run ask again instead of saving', async () => {
     const r = await reachApproval();
     // A decision recorded for another proposal (e.g. an older version) exists before the run looks.
-    await k.approvals.submit({ runId: r.id, stepId: 'approve-deliverable', proposalHash: 'old-hash', decision: 'approved' });
+    await k.approvals.submit({
+      runId: r.id,
+      stepId: 'approve-deliverable',
+      proposalHash: 'old-hash',
+      decision: 'approved',
+    });
     await k.runs.drive(r.id);
     await k.engine.idle();
     const done = await k.runs.get(r.id);
     expect(done.state).toBe('needs_reapproval');
-    const { rows } = await k.pool.query(`select count(*)::int as n from assets where run_id=$1`, [r.id]);
+    const { rows } = await k.pool.query(`select count(*)::int as n from assets where run_id=$1`, [
+      r.id,
+    ]);
     expect(rows[0].n).toBe(0);
   });
 
@@ -210,7 +234,11 @@ describe.skipIf(!TEST_DATABASE_URL)('runs (real Postgres)', () => {
     await k.engine.idle();
     const v = await k.runs.get(run.id);
     expect(v.state).toBe('failed');
-    expect(v.outcome).toMatchObject({ status: 'failed', code: 'provider_unavailable', reason: 'Could not reach the AI.' });
+    expect(v.outcome).toMatchObject({
+      status: 'failed',
+      code: 'provider_unavailable',
+      reason: 'Could not reach the AI.',
+    });
     expect(calls()).toBe(2); // 1 + maxRetries
     // Driving it again (reconcile, a duplicate event) does not spend more.
     await k.runs.drive(run.id);
@@ -220,7 +248,11 @@ describe.skipIf(!TEST_DATABASE_URL)('runs (real Postgres)', () => {
 
   it('an unusable reply (cut off) ends the run as failed and its cost still counts', async () => {
     await setup({
-      anthropic: () => ({ text: '寫到一半', finish: 'truncated', usage: { inputTokens: 100, outputTokens: 50 } }),
+      anthropic: () => ({
+        text: '寫到一半',
+        finish: 'truncated',
+        usage: { inputTokens: 100, outputTokens: 50 },
+      }),
     });
     const { run } = await create();
     await k.engine.idle();
@@ -242,11 +274,17 @@ describe.skipIf(!TEST_DATABASE_URL)('runs (real Postgres)', () => {
     const reserved = one.run.reservedMicro;
     expect(reserved).toBeGreaterThan(0);
     await k.engine.idle();
-    await k.pool.query(`update threads set budget_limit_micro=$2 where id=$1`, [k.threadId, reserved + reserved - 1]);
+    await k.pool.query(`update threads set budget_limit_micro=$2 where id=$1`, [
+      k.threadId,
+      reserved + reserved - 1,
+    ]);
     // `one` is still active (waiting), holding its reservation.
     await expect(create()).rejects.toMatchObject({ code: 'over_budget' });
     await k.runs.cancel(one.run.id);
-    await k.pool.query(`update threads set budget_limit_micro=$2 where id=$1`, [k.threadId, reserved + COST_PER_CALL]);
+    await k.pool.query(`update threads set budget_limit_micro=$2 where id=$1`, [
+      k.threadId,
+      reserved + COST_PER_CALL,
+    ]);
     const results = await Promise.allSettled([create(), create()]);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
   });
@@ -368,10 +406,20 @@ describe.skipIf(!TEST_DATABASE_URL)('runs (real Postgres)', () => {
   });
 
   it('refuses an AI that is not set up, and a conclusion that is not in this discussion', async () => {
-    await expect(create({ agentId: 'gemini' })).rejects.toMatchObject({ status: 400, code: 'agent_not_hired' });
+    await expect(create({ agentId: 'gemini' })).rejects.toMatchObject({
+      status: 400,
+      code: 'agent_not_hired',
+    });
     const other = await k.service.createThread({ title: 'other', budgetLimitMicro: 1_000_000 });
-    const foreign = await k.service.saveConclusion(other.id, { title: 'x', content: 'y', sourceMessageIds: [] });
-    await expect(create({ assetId: foreign.assetId })).rejects.toMatchObject({ status: 404, code: 'conclusion_not_found' });
+    const foreign = await k.service.saveConclusion(other.id, {
+      title: 'x',
+      content: 'y',
+      sourceMessageIds: [],
+    });
+    await expect(create({ assetId: foreign.assetId })).rejects.toMatchObject({
+      status: 404,
+      code: 'conclusion_not_found',
+    });
     await expect(create({ version: 99 })).rejects.toMatchObject({ status: 404 });
     expect(calls()).toBe(0);
   });

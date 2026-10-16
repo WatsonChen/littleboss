@@ -94,7 +94,10 @@ export function buildApp(opts: BuildAppOptions = {}) {
   app.route({
     method: ['GET', 'POST', 'PUT'],
     url: '/api/inngest',
-    handler: serve({ client: inngest, functions: [ping, createAiCallFunction(getService), ...createRunFunctions(getRuns)] }),
+    handler: serve({
+      client: inngest,
+      functions: [ping, createAiCallFunction(getService), ...createRunFunctions(getRuns)],
+    }),
   });
 
   return app;

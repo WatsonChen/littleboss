@@ -13,7 +13,9 @@ describe('run labels', () => {
 
   it('explains failures in plain words and falls back to the server reason', () => {
     expect(outcomeText({ status: 'failed', code: 'truncated', reason: 'x' })).toContain('截斷');
-    expect(outcomeText({ status: 'failed', code: 'weird', reason: 'server said so' })).toBe('server said so');
+    expect(outcomeText({ status: 'failed', code: 'weird', reason: 'server said so' })).toBe(
+      'server said so',
+    );
     expect(outcomeText({ status: 'rejected' })).toContain('沒有存');
     expect(outcomeText(null)).toBeNull();
   });

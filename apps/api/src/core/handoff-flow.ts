@@ -25,7 +25,12 @@ export interface HandoffContext extends FlowContext {
 export type ModelStepResult =
   | { status: 'ok'; text: string; costMicro: number | null }
   /** The model answered but not usably (cut off, refused, empty). The partial text is kept. */
-  | { status: 'bad'; reason: 'truncated' | 'refused' | 'empty'; text: string; costMicro: number | null }
+  | {
+      status: 'bad';
+      reason: 'truncated' | 'refused' | 'empty';
+      text: string;
+      costMicro: number | null;
+    }
   /** Cannot proceed and retrying will not help (not hired, over budget, bad key...). */
   | { status: 'failed'; code: string; reason: string };
 
@@ -76,7 +81,10 @@ export function deliverableHash(p: { title: string; content: string }): string {
     .digest('hex');
 }
 
-export async function handoffFlow(ctx: HandoffContext, input: HandoffInput): Promise<HandoffOutcome> {
+export async function handoffFlow(
+  ctx: HandoffContext,
+  input: HandoffInput,
+): Promise<HandoffOutcome> {
   const draft = await ctx.step(draftRef, { task: input });
   if (draft.status !== 'ok') return stopped(draft);
 

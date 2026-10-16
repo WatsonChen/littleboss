@@ -43,7 +43,11 @@ export class ModelGateway {
   ): Promise<GatewayResult> {
     const agent = this.roster.get(agentId);
     if (!agent.hired || !agent.apiKey) {
-      return { status: 'failed', code: 'agent_not_hired', reason: `${agent.displayName} is not set up.` };
+      return {
+        status: 'failed',
+        code: 'agent_not_hired',
+        reason: `${agent.displayName} is not set up.`,
+      };
     }
     let r;
     try {
@@ -60,7 +64,13 @@ export class ModelGateway {
         if (err.status === 401 || err.status === 403) {
           return { status: 'failed', code: 'auth_failed', reason: err.message };
         }
-        if (err.status !== undefined && err.status >= 400 && err.status < 500 && err.status !== 429 && err.status !== 408) {
+        if (
+          err.status !== undefined &&
+          err.status >= 400 &&
+          err.status < 500 &&
+          err.status !== 429 &&
+          err.status !== 408
+        ) {
           return { status: 'failed', code: 'provider_rejected', reason: err.message };
         }
       }

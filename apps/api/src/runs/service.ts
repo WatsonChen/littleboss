@@ -110,7 +110,11 @@ export class RunService {
     }
     const conclusion = await this.repo.getConclusion(threadId, req.assetId, req.version);
     if (!conclusion) {
-      throw new HttpError(404, 'conclusion_not_found', 'No such saved conclusion in this discussion.');
+      throw new HttpError(
+        404,
+        'conclusion_not_found',
+        'No such saved conclusion in this discussion.',
+      );
     }
     const input: HandoffInput = { conclusion, instruction: req.instruction };
     const config: RunConfigFrozen = {
@@ -218,7 +222,11 @@ export class RunService {
       return { accepted: false, run: await this.view(run) };
     }
     if (run.state !== 'waiting_approval') {
-      throw new HttpError(409, 'not_waiting_approval', 'This run is not waiting for your approval.');
+      throw new HttpError(
+        409,
+        'not_waiting_approval',
+        'This run is not waiting for your approval.',
+      );
     }
     const proposal = (await this.repo.getSteps(run.id)).find((s) => s.name === PROPOSE_STEP)
       ?.output as Proposal | undefined;
@@ -300,7 +308,11 @@ export class RunService {
     const active = ACTIVE_STATES.includes(state);
 
     const done = (name: string): boolean =>
-      name === HUMAN_STEP ? input !== null : name === APPROVE_STEP ? approval.status !== 'pending' : byName.has(name);
+      name === HUMAN_STEP
+        ? input !== null
+        : name === APPROVE_STEP
+          ? approval.status !== 'pending'
+          : byName.has(name);
     const textOf = (name: string): string | null => {
       const row = byName.get(name);
       if (name === HUMAN_STEP) return input;
@@ -324,7 +336,7 @@ export class RunService {
         label: LABELS[name] ?? name,
         status,
         costMicro: byName.get(name)?.costMicro ?? 0,
-        attempts: attempts[name]?.count ?? (byName.get(name)?.executions ?? 0),
+        attempts: attempts[name]?.count ?? byName.get(name)?.executions ?? 0,
         text: textOf(name),
       });
     }

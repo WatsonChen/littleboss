@@ -23,7 +23,8 @@ function system(agentName: string): string {
 }
 
 export function draftPrompt(agentName: string, task: HandoffInput): RolePrompt {
-  const instruction = task.instruction.trim() || 'Carry out the conclusion and give me a usable draft.';
+  const instruction =
+    task.instruction.trim() || 'Carry out the conclusion and give me a usable draft.';
   return {
     system: system(agentName),
     user: [

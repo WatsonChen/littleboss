@@ -236,13 +236,18 @@ export class RunRepository {
     );
   }
 
-  async attemptsOf(runId: string): Promise<Record<string, { count: number; lastError: string | null }>> {
+  async attemptsOf(
+    runId: string,
+  ): Promise<Record<string, { count: number; lastError: string | null }>> {
     const { rows } = await this.pool.query(
       `select name, count, last_error from run_step_attempts where run_id=$1`,
       [runId],
     );
     return Object.fromEntries(
-      rows.map((r) => [r.name as string, { count: r.count as number, lastError: r.last_error as string | null }]),
+      rows.map((r) => [
+        r.name as string,
+        { count: r.count as number, lastError: r.last_error as string | null },
+      ]),
     );
   }
 
