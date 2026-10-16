@@ -35,6 +35,7 @@ export function registerDiscussionRoutes(
   app: FastifyInstance,
   getService: () => DiscussionService,
   env: Record<string, string | undefined>,
+  extra?: (api: FastifyInstance) => void,
 ) {
   void app.register(async (api) => {
     api.setErrorHandler((err, _req, reply) => {
@@ -100,5 +101,7 @@ export function registerDiscussionRoutes(
       );
       return reply.status(201).send({ conclusion });
     });
+
+    extra?.(api);
   });
 }

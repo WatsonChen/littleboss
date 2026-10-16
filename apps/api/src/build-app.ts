@@ -9,10 +9,14 @@ import { createAiCallFunction } from './discussion/inngest.js';
 import { createDiscussionService, type DiscussionService } from './discussion/index.js';
 import { HttpError } from './discussion/errors.js';
 import { registerDiscussionRoutes } from './discussion/routes.js';
+import { createRunFunctions } from './runs/engine.js';
+import { createRunService, type RunService } from './runs/index.js';
+import { registerRunRoutes } from './runs/routes.js';
 
 export interface BuildAppOptions {
   /** Inject a ready service (tests). Otherwise one is created lazily from DATABASE_URL. */
   discussion?: DiscussionService;
+  runs?: RunService;
   env?: Record<string, string | undefined>;
 }
 
@@ -43,20 +47,30 @@ export function buildApp(opts: BuildAppOptions = {}) {
   // The database and the discussion service are only created when first needed, so the health
   // check and Inngest sync keep working while the database is not configured yet.
   let service = opts.discussion;
+  let runService = opts.runs;
   let pool: Pool | undefined;
-  const getService = (): DiscussionService => {
-    if (service) return service;
+  const getPool = (): Pool => {
+    if (pool) return pool;
     if (!env.DATABASE_URL) {
       throw new HttpError(503, 'database_not_configured', 'The database is not connected yet.');
     }
     pool = createPool(env.DATABASE_URL);
-    service = createDiscussionService(env, pool);
+    return pool;
+  };
+  const getService = (): DiscussionService => {
+    if (service) return service;
+    service = createDiscussionService(env, getPool());
     return service;
+  };
+  const getRuns = (): RunService => {
+    if (runService) return runService;
+    runService = createRunService(env, getPool());
+    return runService;
   };
   app.addHook('onClose', async () => {
     await pool?.end();
   });
-  registerDiscussionRoutes(app, getService, env);
+  registerDiscussionRoutes(app, getService, env, (api) => registerRunRoutes(api, getRuns));
 
   // Checks the database connection without exposing anything but whether it works and how fast.
   app.get('/health/db', async (_req, reply) => {
@@ -80,7 +94,7 @@ export function buildApp(opts: BuildAppOptions = {}) {
   app.route({
     method: ['GET', 'POST', 'PUT'],
     url: '/api/inngest',
-    handler: serve({ client: inngest, functions: [ping, createAiCallFunction(getService)] }),
+    handler: serve({ client: inngest, functions: [ping, createAiCallFunction(getService), ...createRunFunctions(getRuns)] }),
   });
 
   return app;

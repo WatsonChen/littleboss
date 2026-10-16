@@ -144,6 +144,8 @@ export type SaveConclusionRequest = z.infer<typeof SaveConclusionRequest>;
 
 export const AssetVersionView = z.object({
   assetId: z.string(),
+  /** A conclusion saved from a discussion, or a deliverable a run produced. */
+  kind: z.enum(['conclusion', 'deliverable']),
   title: z.string(),
   version: z.number().int(),
   content: z.string(),

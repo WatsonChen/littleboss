@@ -13,12 +13,16 @@ export interface Prompt {
 
 export const PROMPT_VERSION = 1;
 
-const TAGS = /<(\/?)(background|transcript|review_target|task)(?=[\s>/])/gi;
-
-/** Pasted text and other AIs' replies must not be able to close or fake our section tags. */
-function neutralize(text: string): string {
-  return text.replace(TAGS, '‹$1$2');
+/**
+ * Pasted text and other AIs' replies must not be able to close or fake our section tags.
+ * `names` are the tag names the prompt uses.
+ */
+export function neutralizeTags(text: string, names: readonly string[]): string {
+  return text.replace(new RegExp(`<(/?)(${names.join('|')})(?=[\\s>/])`, 'gi'), '‹$1$2');
 }
+
+const neutralize = (text: string) =>
+  neutralizeTags(text, ['background', 'transcript', 'review_target', 'task']);
 
 export function buildPrompt(input: {
   agentName: string;

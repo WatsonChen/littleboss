@@ -98,9 +98,20 @@ export function toView(m: MessageRow): MessageView {
  * What a message has cost so far: the real cost when known, otherwise its estimate, plus what its
  * earlier (retried) attempts cost. Used for the budget, so it errs towards counting too much.
  */
-const SPENT_OF_MESSAGE = `
+export const SPENT_OF_MESSAGE = `
   coalesce(m.cost_micro, m.estimated_cost_micro, 0)
   + coalesce((select sum(coalesce((a->>'costMicro')::bigint, 0)) from jsonb_array_elements(m.attempts) a), 0)`;
+
+/**
+ * What the thread's runs have cost. A run that is still active counts the larger of what is set
+ * aside for it and what it has really spent; a finished run counts only what it really spent.
+ */
+export const spentOfRuns = (threadIdExpr: string) => `
+  (select coalesce(sum(case when r.state in ('running','waiting_input','waiting_approval')
+            then greatest(r.reserved_micro, rc.cost) else rc.cost end), 0)
+     from runs r
+     left join lateral (select coalesce(sum(s.cost_micro), 0) as cost from run_steps s where s.run_id = r.id) rc on true
+    where r.thread_id = ${threadIdExpr})`;
 
 export interface NewMessage {
   role: Role;
@@ -156,7 +167,8 @@ export class ThreadTx {
 
   async spentMicro(): Promise<number> {
     const { rows } = await this.c.query(
-      `select coalesce(sum(${SPENT_OF_MESSAGE}), 0)::bigint as spent from thread_messages m where m.thread_id=$1`,
+      `select (coalesce(sum(${SPENT_OF_MESSAGE}), 0) + ${spentOfRuns('$1')})::bigint as spent
+         from thread_messages m where m.thread_id=$1`,
       [this.threadId],
     );
     return Number(rows[0].spent);
@@ -258,7 +270,7 @@ export class ThreadTx {
     let title = input.title;
     if (assetId) {
       const { rows } = await this.c.query(
-        `select id, title from assets where id=$1 and thread_id=$2 for update`,
+        `select id, title from assets where id=$1 and thread_id=$2 and kind='conclusion' for update`,
         [assetId, this.threadId],
       );
       if (!rows[0])
@@ -282,6 +294,7 @@ export class ThreadTx {
     await this.c.query(`update threads set updated_at=now() where id=$1`, [this.threadId]);
     return {
       assetId: assetId!,
+      kind: 'conclusion',
       title,
       version: rows[0].version,
       content: input.content,
@@ -306,7 +319,8 @@ export class DiscussionRepository {
     const { rows } = await this.pool.query(
       `select t.id, t.title, t.budget_limit_micro, t.updated_at,
          (select count(*) from thread_messages m where m.thread_id = t.id)::int as message_count,
-         (select coalesce(sum(${SPENT_OF_MESSAGE}), 0) from thread_messages m where m.thread_id = t.id)::bigint as spent
+         ((select coalesce(sum(${SPENT_OF_MESSAGE}), 0) from thread_messages m where m.thread_id = t.id)
+           + ${spentOfRuns('t.id')})::bigint as spent
        from threads t ${where} order by t.updated_at desc`,
       params,
     );
@@ -426,13 +440,14 @@ export class DiscussionRepository {
 
   async listAssets(threadId: string): Promise<AssetVersionView[]> {
     const { rows } = await this.pool.query(
-      `select a.id as asset_id, a.title, v.version, v.content, v.source_message_ids, v.created_at
+      `select a.id as asset_id, a.kind, a.title, v.version, v.content, v.source_message_ids, v.created_at
          from assets a join asset_versions v on v.asset_id = a.id
         where a.thread_id=$1 order by a.created_at, a.id, v.version desc`,
       [threadId],
     );
     return rows.map((r) => ({
       assetId: r.asset_id,
+      kind: r.kind,
       title: r.title,
       version: r.version,
       content: r.content,
