@@ -398,3 +398,92 @@ textarea {
 .older {
   margin-top: 8px;
 }
+
+/* ---- tasks (runs) ---- */
+h3 {
+  font-size: 0.95rem;
+  margin: 12px 0 6px;
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1px solid var(--brand);
+}
+.chip-attn {
+  background: var(--accent);
+  color: var(--text);
+}
+.waiting-box {
+  background: #fff;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+.ok-box {
+  background: #eef7ee;
+  border: 1px solid #b8d8b8;
+  border-radius: 10px;
+  padding: 10px;
+}
+.run-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.run-row {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--aux);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font: inherit;
+  color: inherit;
+}
+.run-steps {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  display: grid;
+  gap: 4px;
+}
+.run-step {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.run-step-mark {
+  width: 1.2em;
+  text-align: center;
+}
+.run-step-done {
+  color: var(--text);
+}
+.run-step-active,
+.run-step-waiting {
+  font-weight: 600;
+}
+.run-pending {
+  background: #fff;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 10px;
+  margin: 10px 0;
+  display: grid;
+  gap: 8px;
+}
+.run-pending textarea {
+  width: 100%;
+}

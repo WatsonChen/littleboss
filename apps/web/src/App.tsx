@@ -5,7 +5,7 @@ import { Room } from './views/Room';
 import { ThreadList } from './views/ThreadList';
 import { TokenGate } from './views/TokenGate';
 
-const ROOM = /^#\/t\/([0-9a-f-]{36})$/i;
+const ROOM = /^#\/t\/([0-9a-f-]{36})(?:\/r\/([0-9a-f-]{36}))?$/i;
 
 function useHash() {
   const [hash, setHash] = useState(location.hash);
@@ -43,7 +43,12 @@ export function App() {
 
   const room = ROOM.exec(hash);
   return room ? (
-    <Room key={`${room[1]}-${epoch}`} client={client} threadId={room[1]!} />
+    <Room
+      key={`${room[1]}-${room[2] ?? ''}-${epoch}`}
+      client={client}
+      threadId={room[1]!}
+      openRunId={room[2] ?? null}
+    />
   ) : (
     <ThreadList key={epoch} client={client} />
   );

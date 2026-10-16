@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ThreadSummary } from '@littleboss/shared';
+import type { RunView, ThreadSummary } from '@littleboss/shared';
 import type { ApiClient } from '../api';
 import { formatUsd } from '../lib/format';
+import { runStateLabel } from '../lib/runs';
 
 export function ThreadList({ client }: { client: ApiClient }) {
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [waiting, setWaiting] = useState<RunView[]>([]);
 
   const load = useCallback(() => {
     client
@@ -18,6 +20,10 @@ export function ThreadList({ client }: { client: ApiClient }) {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, [client]);
   useEffect(load, [load]);
+  useEffect(() => {
+    // The tasks that wait for the person are a convenience: a failure here never blocks the list.
+    client.listWaitingRuns().then(setWaiting, () => undefined);
+  }, [client]);
 
   async function create() {
     if (creating) return;
@@ -47,6 +53,21 @@ export function ThreadList({ client }: { client: ApiClient }) {
             重試
           </button>
         </p>
+      )}
+      {waiting.length > 0 && (
+        <section className="waiting-box" aria-label="等你處理">
+          <h2>等你處理（{waiting.length}）</h2>
+          <ul className="thread-list">
+            {waiting.map((r) => (
+              <li key={r.id}>
+                <a href={`#/t/${r.threadId}/r/${r.id}`}>
+                  <strong>{r.title}</strong>
+                  <span className="muted small">{runStateLabel(r.state)}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
       {threads === null && !error && <p className="muted">載入中…</p>}
       {threads?.length === 0 && (

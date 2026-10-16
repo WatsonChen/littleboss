@@ -5,13 +5,19 @@ import {
   EstimateResponse,
   HealthResponse,
   MessageView,
+  CreateRunResponse,
+  RunView,
   SendMessageResponse,
+  SubmitResponse,
   ThreadDetail,
   ThreadSummary,
+  type CreateRunRequest,
   type CreateThreadRequest,
   type EstimateRequest,
   type SaveConclusionRequest,
   type SendMessageRequest,
+  type SubmitApprovalRequest,
+  type SubmitInputRequest,
 } from '@littleboss/shared';
 
 const defaultBase = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
@@ -138,6 +144,19 @@ export function createApiClient(opts: ClientOptions = {}) {
           req,
         )
       ).conclusion,
+    createRun: (threadId: string, req: CreateRunRequest) =>
+      request('POST', `/api/threads/${threadId}/runs`, CreateRunResponse, req),
+    listRuns: async (threadId: string) =>
+      (await request('GET', `/api/threads/${threadId}/runs`, z.object({ runs: z.array(RunView) })))
+        .runs,
+    listWaitingRuns: async () =>
+      (await request('GET', '/api/runs/waiting', z.object({ runs: z.array(RunView) }))).runs,
+    submitRunInput: (runId: string, req: SubmitInputRequest) =>
+      request('POST', `/api/runs/${runId}/input`, SubmitResponse, req),
+    submitRunApproval: (runId: string, req: SubmitApprovalRequest) =>
+      request('POST', `/api/runs/${runId}/approval`, SubmitResponse, req),
+    cancelRun: async (runId: string) =>
+      (await request('POST', `/api/runs/${runId}/cancel`, z.object({ run: RunView }), {})).run,
   };
 }
 
