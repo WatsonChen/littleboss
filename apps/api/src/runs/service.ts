@@ -180,7 +180,8 @@ export class RunService {
 
   async listWaiting(): Promise<RunView[]> {
     const runs = await this.repo.listWaiting();
-    return Promise.all(runs.map((r) => this.view(r)));
+    const views = await Promise.all(runs.map((r) => this.view(r)));
+    return views.filter((v) => v.state === 'waiting_input' || v.state === 'waiting_approval');
   }
 
   // ---- what the person does -------------------------------------------------------------------
@@ -291,7 +292,12 @@ export class RunService {
       stepId: APPROVE_STEP,
       currentProposalHash: '',
     });
-    const active = ACTIVE_STATES.includes(run.state);
+    // Once the person's answer is saved the run is busy again, even before the driver notices.
+    const answered =
+      (run.state === 'waiting_input' && input !== null) ||
+      (run.state === 'waiting_approval' && approval.status !== 'pending');
+    const state = answered ? 'running' : run.state;
+    const active = ACTIVE_STATES.includes(state);
 
     const done = (name: string): boolean =>
       name === HUMAN_STEP ? input !== null : name === APPROVE_STEP ? approval.status !== 'pending' : byName.has(name);
@@ -310,7 +316,7 @@ export class RunService {
       let status: RunStepView['status'] | null = finished ? 'done' : null;
       if (!finished && active && !currentTaken) {
         currentTaken = true;
-        status = run.state === 'running' ? 'active' : 'waiting';
+        status = state === 'running' ? 'active' : 'waiting';
       }
       if (!status) continue;
       stepViews.push({
@@ -324,14 +330,14 @@ export class RunService {
     }
 
     let pending: RunPending | null = null;
-    if (run.state === 'waiting_input') {
+    if (state === 'waiting_input') {
       pending = {
         kind: 'input',
         stepName: HUMAN_STEP,
         prompt: INPUT_PROMPT,
         draft: textOf(DRAFT_STEP) ?? '',
       };
-    } else if (run.state === 'waiting_approval') {
+    } else if (state === 'waiting_approval') {
       const p = byName.get(PROPOSE_STEP)?.output as Proposal | undefined;
       if (p) pending = { kind: 'approval', stepName: APPROVE_STEP, proposal: p };
     }
@@ -341,7 +347,7 @@ export class RunService {
       id: run.id,
       threadId: run.threadId,
       title: run.title,
-      state: run.state,
+      state,
       config: {
         agentId: run.config.agentId,
         model: run.config.model,

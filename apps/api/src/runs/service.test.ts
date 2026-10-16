@@ -342,7 +342,10 @@ describe.skipIf(!TEST_DATABASE_URL)('runs (real Postgres)', () => {
     const res = await k.runs.submitInput(r.id, { stepName: 'human-return', text: '加上午餐' });
     expect(res.accepted).toBe(true); // saved even though the engine could not be told
     await k.engine.idle();
-    expect((await k.runs.get(r.id)).state).toBe('waiting_input');
+    // The answer is saved, so the person sees the run as busy again, but nothing has run yet.
+    expect((await k.runs.get(r.id)).state).toBe('running');
+    expect((await k.runs.get(r.id)).pending).toBeNull();
+    expect(calls()).toBe(1);
     await new Promise((r) => setTimeout(r, 10));
     await k.runs.reconcile();
     await k.engine.idle();

@@ -3,14 +3,28 @@ import type { AgentInfo, AssetVersionView, MessageView } from '@littleboss/share
 import type { ApiClient } from '../api';
 import { formatUsd, isActive } from '../lib/format';
 import { SendFlow } from '../lib/send-flow';
+import { needsPerson, useRuns } from '../lib/runs';
 import { useThread } from '../lib/use-thread';
 import { MessageItem, type MessageActions } from './MessageItem';
 import { ConclusionSheet, ConclusionsSheet, ConfirmSheet } from './RoomSheets';
+import { HandoffSheet, RunsSheet } from './RunSheets';
 
 const DEFAULT_TITLE = '新的討論';
 
-export function Room({ client, threadId }: { client: ApiClient; threadId: string }) {
+export function Room({
+  client,
+  threadId,
+  openRunId = null,
+}: {
+  client: ApiClient;
+  threadId: string;
+  openRunId?: string | null;
+}) {
   const { detail, error, refresh } = useThread(client, threadId);
+  const { runs, refresh: refreshRuns } = useRuns(client, threadId);
+  const [runsOpen, setRunsOpen] = useState(openRunId !== null);
+  const [openRun, setOpenRun] = useState<string | null>(openRunId);
+  const [handoff, setHandoff] = useState<AssetVersionView | null>(null);
   const [mode, setMode] = useState<'user' | 'context'>('user');
   const [text, setText] = useState('');
   const [replyTo, setReplyTo] = useState<MessageView | null>(null);
@@ -126,6 +140,10 @@ export function Room({ client, threadId }: { client: ApiClient; threadId: string
         <button className="btn-secondary" onClick={() => setSheet({ kind: 'list' })}>
           結論
           {conclusions.length > 0 ? `（${new Set(conclusions.map((c) => c.assetId)).size}）` : ''}
+        </button>
+        <button className="btn-secondary" onClick={() => setRunsOpen(true)}>
+          任務
+          {runs.some(needsPerson) && <span className="dot" aria-label="有任務在等你" />}
         </button>
       </header>
 
@@ -309,6 +327,44 @@ export function Room({ client, threadId }: { client: ApiClient; threadId: string
           items={conclusions}
           onClose={() => setSheet(null)}
           onEdit={(latest) => setSheet({ kind: 'edit', from: latest })}
+          onHandoff={(latest) => {
+            setSheet(null);
+            setHandoff(latest);
+          }}
+        />
+      )}
+      {handoff && (
+        <HandoffSheet
+          client={client}
+          threadId={threadId}
+          conclusion={handoff}
+          agents={agents}
+          onClose={() => setHandoff(null)}
+          onStarted={(run) => {
+            setHandoff(null);
+            setOpenRun(run.id);
+            setRunsOpen(true);
+            void refreshRuns();
+            void refresh();
+          }}
+        />
+      )}
+      {runsOpen && (
+        <RunsSheet
+          client={client}
+          runs={runs}
+          openId={openRun}
+          onOpen={setOpenRun}
+          onChanged={async () => {
+            await refreshRuns();
+            await refresh();
+            await loadConclusions();
+          }}
+          onClose={() => {
+            setRunsOpen(false);
+            setOpenRun(null);
+            if (openRunId) location.hash = `#/t/${threadId}`;
+          }}
         />
       )}
     </main>

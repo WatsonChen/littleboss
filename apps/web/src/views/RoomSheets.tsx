@@ -79,7 +79,7 @@ export function ConclusionSheet(props: {
 }) {
   const latest = useMemo(() => {
     const m = new Map<string, AssetVersionView>();
-    for (const v of props.existing)
+    for (const v of props.existing.filter((x) => x.kind === 'conclusion'))
       if (!m.has(v.assetId) || v.version > m.get(v.assetId)!.version) m.set(v.assetId, v);
     return [...m.values()];
   }, [props.existing]);
@@ -152,23 +152,32 @@ export function ConclusionSheet(props: {
 export function ConclusionsSheet(props: {
   items: AssetVersionView[];
   onEdit(latest: AssetVersionView): void;
+  onHandoff(latest: AssetVersionView): void;
   onClose(): void;
 }) {
-  const groups = useMemo(() => {
+  const [conclusions, deliverables] = useMemo(() => {
     const m = new Map<string, AssetVersionView[]>();
     for (const v of props.items) m.set(v.assetId, [...(m.get(v.assetId) ?? []), v]);
-    return [...m.values()].map((vs) => vs.sort((a, b) => b.version - a.version));
+    const groups = [...m.values()].map((vs) => vs.sort((a, b) => b.version - a.version));
+    return [
+      groups.filter((vs) => vs[0]!.kind === 'conclusion'),
+      groups.filter((vs) => vs[0]!.kind === 'deliverable'),
+    ];
   }, [props.items]);
   return (
-    <Sheet title="已存的結論" onClose={props.onClose}>
-      {groups.length === 0 && <p className="empty">還沒有結論。在訊息上按「選為結論」。</p>}
-      {groups.map((vs) => (
+    <Sheet title="結論與成品" onClose={props.onClose}>
+      <h3>結論</h3>
+      {conclusions.length === 0 && <p className="empty">還沒有結論。在訊息上按「選為結論」。</p>}
+      {conclusions.map((vs) => (
         <details key={vs[0]!.assetId} className="asset">
           <summary>
             <strong>{vs[0]!.title}</strong> <span className="chip">v{vs[0]!.version}</span>
           </summary>
           <p className="msg-body">{vs[0]!.content}</p>
           <div className="row">
+            <button className="btn-primary" onClick={() => props.onHandoff(vs[0]!)}>
+              交給 AI
+            </button>
             <button className="btn-secondary" onClick={() => props.onEdit(vs[0]!)}>
               編輯成新版本
             </button>
@@ -186,6 +195,19 @@ export function ConclusionsSheet(props: {
           )}
         </details>
       ))}
+      {deliverables.length > 0 && (
+        <>
+          <h3>成品（AI 做好、你核准過的）</h3>
+          {deliverables.map((vs) => (
+            <details key={vs[0]!.assetId} className="asset">
+              <summary>
+                <strong>{vs[0]!.title}</strong> <span className="chip">成品</span>
+              </summary>
+              <p className="msg-body">{vs[0]!.content}</p>
+            </details>
+          ))}
+        </>
+      )}
     </Sheet>
   );
 }
