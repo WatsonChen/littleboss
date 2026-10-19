@@ -112,7 +112,7 @@ export function demoCapture(user: string) {
       }
       continue;
     }
-    if (/會|約|看診|聚餐|面試|開會|見面/.test(seg)) {
+    if (/會|約|看診|聚餐|面試|開會|見面|吃飯/.test(seg)) {
       const start = demoTime(seg, now);
       items.push({
         kind: 'event',
@@ -140,7 +140,26 @@ function demoTime(seg: string, now: string): string | null {
   if (!m) return null;
   const offset = m[2]!;
   const day = /今天/.test(seg) ? 0 : /明天/.test(seg) ? 1 : /後天/.test(seg) ? 2 : null;
-  const t = /(\d{1,2})(?:[:點](\d{2})?)/.exec(seg);
+  const CN: Record<string, string> = {
+    一: '1',
+    二: '2',
+    兩: '2',
+    三: '3',
+    四: '4',
+    五: '5',
+    六: '6',
+    七: '7',
+    八: '8',
+    九: '9',
+    十: '10',
+    十一: '11',
+    十二: '12',
+  };
+  const num = seg.replace(
+    /(十[一二]|[一二兩三四五六七八九十])點/g,
+    (_m, c: string) => `${CN[c]}點`,
+  );
+  const t = /(\d{1,2})(?:[:點](\d{2})?)/.exec(num);
   if (day === null || !t) return null;
   let hour = Number(t[1]);
   if (/下午|晚上/.test(seg) && hour < 12) hour += 12;

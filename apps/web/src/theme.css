@@ -521,3 +521,116 @@ h3 {
   height: 22px;
   flex: none;
 }
+
+/* ---- capture & shopping ---- */
+.home-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 4px;
+}
+/* Links that look like buttons (navigation between screens). */
+a.btn-secondary,
+a.btn-primary,
+a.btn-quiet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  min-height: 44px;
+  padding: 0 14px;
+  text-decoration: none;
+}
+a.btn-quiet {
+  min-height: 36px;
+  padding: 0 8px;
+  text-decoration: underline;
+}
+.cap-source {
+  background: #fff;
+  border: 1px solid var(--aux);
+  border-radius: 10px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+.cap-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  display: grid;
+  gap: 10px;
+}
+.cap-item {
+  background: #fff;
+  border: 1px solid var(--aux);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+.cap-item p {
+  margin: 0;
+}
+.cap-needs_info {
+  border-color: var(--accent);
+}
+.cap-rejected {
+  opacity: 0.55;
+}
+.cap-failed {
+  border-color: #d9a0a3;
+}
+.cap-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.cap-status {
+  margin-left: auto;
+}
+.cap-guess .chip {
+  background: #fff3cd;
+}
+.cap-warn {
+  color: #8a5a00;
+}
+.cap-question {
+  font-weight: 600;
+}
+.cap-edit input:not([type='checkbox']),
+.cap-edit textarea {
+  width: 100%;
+}
+.check {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 44px;
+  font-size: 1rem;
+}
+.check input {
+  width: 22px;
+  height: 22px;
+}
+.shop-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  background: #fff;
+  border: 1px solid var(--aux);
+  border-radius: 10px;
+}
+.shop-list:empty {
+  display: none;
+}
+.shop-list li + li {
+  border-top: 1px solid var(--aux);
+}
+.shop-list li {
+  padding: 0 12px;
+}
+.shop-done span {
+  text-decoration: line-through;
+  color: #6b6672;
+}

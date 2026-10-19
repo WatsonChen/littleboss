@@ -29,6 +29,7 @@ pnpm dev:web                    # http://localhost:5173
 
 本地至少要在 `apps/api/.env` 設 `DATABASE_URL`（建議用另一個 Neon branch 或本地 Postgres，不要連正式資料庫）。
 不想花錢、也不想申請金鑰時，加上 `LB_FAKE_PROVIDERS=1`：三位 AI 都會回標示清楚的示範回覆。
+示範模式下，「隨手捕捉」的假 AI 會用簡單規則整理（買…、含時間的行程），行程寫進 little boss 自己的示範行事曆，不會碰真的 Google 行事曆。
 本地沒設 `ACCESS_TOKEN` 就不需要登入。需要 Node 22.9 以上（讀取 `.env` 用 `--env-file-if-exists`）。
 
 本地 Postgres 範例：
