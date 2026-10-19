@@ -33,11 +33,11 @@ describe('GET /health', () => {
     await app.close();
   });
 
-  it('serves the Inngest endpoint and lists the ping, ai-call, discussion-reconcile and run functions', async () => {
+  it('serves the Inngest endpoint and lists the ping, ai-call, discussion-reconcile, run and capture functions', async () => {
     const app = buildApp();
     const res = await app.inject({ method: 'GET', url: '/api/inngest' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ function_count: 5 });
+    expect(res.json()).toMatchObject({ function_count: 7 });
     await app.close();
   });
 });
