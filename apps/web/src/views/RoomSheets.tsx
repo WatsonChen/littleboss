@@ -27,17 +27,31 @@ export function ConfirmSheet(props: {
       {estimate && (
         <>
           <ul className="estimate-list">
-            {estimate.calls.map((c) => (
-              <li key={c.agentId}>
-                <span>呼叫 {name(c.agentId)}</span>
-                <span>最多約 {formatUsd(c.estimatedCostMicro)}</span>
+            {estimate.auto ? (
+              <li>
+                <span>
+                  AI 會自動輪流討論，最多 {estimate.auto.maxTurns} 次呼叫
+                  {estimate.auto.includesSummary ? '（含小結）' : ''}
+                </span>
               </li>
-            ))}
+            ) : (
+              estimate.calls.map((c) => (
+                <li key={c.agentId}>
+                  <span>呼叫 {name(c.agentId)}</span>
+                  <span>最多約 {formatUsd(c.estimatedCostMicro)}</span>
+                </li>
+              ))
+            )}
             <li className="total">
-              <span>合計（估算）</span>
+              <span>{estimate.auto ? '最多（估算）' : '合計（估算）'}</span>
               <span>約 {formatUsd(estimate.totalMicro)}</span>
             </li>
           </ul>
+          {estimate.auto && (
+            <p className="muted small">
+              這是全部輪次都講滿的上限。AI 覺得沒有新東西可說就會提早結束，實際通常更少。
+            </p>
+          )}
           <p className="muted small">
             這是送出前的估算，實際依 AI 回報的用量計費。本討論已用 {formatUsd(estimate.spentMicro)}
             ，上限 {formatUsd(estimate.budgetLimitMicro)}。

@@ -39,6 +39,15 @@ export function MessageItem(props: {
     );
   }
 
+  if (m.role === 'user' && m.autoKind === 'review_request') {
+    // The boss did not type this: it records that saving a conclusion asked the reviewer to check it.
+    return (
+      <p className="msg-note muted small" aria-label="自動檢核">
+        🔍 {m.content}（自動）
+      </p>
+    );
+  }
+
   if (m.role === 'user') {
     return (
       <article className={`msg msg-user${selected ? ' selected' : ''}`}>
@@ -68,6 +77,8 @@ export function MessageItem(props: {
     <article className={`msg msg-agent agent-${m.agentId}${selected ? ' selected' : ''}`}>
       <div className="msg-head">
         <span className="chip chip-agent">{name}</span>
+        {m.autoKind === 'summary' && <span className="chip chip-attn">小結</span>}
+        {m.autoKind === 'review' && <span className="chip chip-attn">檢核</span>}
         {statusLabel(m) && <span className={`status status-${m.status}`}>{statusLabel(m)}</span>}
         {m.editedByUser && <span className="status">已手動修改</span>}
         {cost && <span className="muted small cost">{cost}</span>}
@@ -115,6 +126,10 @@ export function MessageItem(props: {
             </button>
           </div>
         </div>
+      )}
+
+      {m.autoKind === 'discussion' && m.autoDone === true && m.status === 'succeeded' && (
+        <p className="muted small">{name} 認為沒有更多要補充了。</p>
       )}
 
       <div className="msg-actions">

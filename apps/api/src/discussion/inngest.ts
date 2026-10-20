@@ -24,3 +24,11 @@ export function createAiCallFunction(getService: () => DiscussionService) {
     },
   );
 }
+
+/** Every five minutes: continue discussions whose next turn was never created, and start lost calls. */
+export function createDiscussionReconcileFunction(getService: () => DiscussionService) {
+  return inngest.createFunction(
+    { id: 'discussion-reconcile', triggers: [{ cron: '*/5 * * * *' }], retries: 0 },
+    async ({ step }) => step.run('sweep', () => getService().reconcile()),
+  );
+}

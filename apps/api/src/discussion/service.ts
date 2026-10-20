@@ -17,9 +17,18 @@ import type { Dispatcher } from './dispatcher.js';
 import { HttpError } from './errors.js';
 import { parseMentions } from './mentions.js';
 import type { Pricing } from './pricing.js';
-import { buildPrompt, type Prompt, type PromptMessage } from './prompt.js';
+import { buildPrompt, splitVerdict, type Prompt, type PromptMessage, type Role } from './prompt.js';
 import { ProviderError, type ProviderSet } from './providers/index.js';
-import { toView, type DiscussionRepository, type Finish, type MessageRow } from './repository.js';
+import {
+  toView,
+  type AutoKind,
+  type AutoPlan,
+  type DiscussionRepository,
+  type Finish,
+  type MessageRow,
+  type ThreadSettings,
+  type ThreadTx,
+} from './repository.js';
 import type { Roster } from './roster.js';
 
 export interface ServiceConfig {
@@ -30,6 +39,10 @@ export interface ServiceConfig {
   staleQueuedMs: number;
   maxInputTokens: number;
   defaultBudgetMicro: number;
+  /** A finished discussion turn whose next step is still missing after this long is picked up again. */
+  staleChainMs: number;
+  /** Most an automatic turn (discussion, summary, review) may write. Short on purpose. */
+  autoMaxOutputTokens: number;
 }
 
 export const DEFAULT_CONFIG: ServiceConfig = {
@@ -38,6 +51,8 @@ export const DEFAULT_CONFIG: ServiceConfig = {
   staleQueuedMs: 60_000,
   maxInputTokens: 100_000,
   defaultBudgetMicro: 2_000_000, // US$2
+  staleChainMs: 90_000,
+  autoMaxOutputTokens: 1_500,
 };
 
 export interface Deps {
@@ -89,6 +104,11 @@ export class DiscussionService {
     return this.repo.createThread(
       req.title ?? '新的討論',
       req.budgetLimitMicro ?? this.cfg.defaultBudgetMicro,
+      {
+        participants: [...new Set(req.participants ?? [])],
+        reviewer: req.reviewer ?? null,
+        maxRounds: req.maxRounds ?? 3,
+      },
     );
   }
 
@@ -132,13 +152,76 @@ export class DiscussionService {
     visible: MessageRow[],
     task: string,
     target: MessageRow | undefined,
+    extra: { role?: Role; reviewTarget?: PromptMessage } = {},
   ): Prompt {
     return buildPrompt({
       agentName: this.d.roster.get(agentId).displayName,
       visible: visible.filter((m) => m.id !== target?.id).map((m) => this.promptMessage(m)),
       task,
-      reviewTarget: target ? this.promptMessage(target) : undefined,
+      reviewTarget: extra.reviewTarget ?? (target ? this.promptMessage(target) : undefined),
+      role: extra.role,
     });
+  }
+
+  private names(ids: AgentId[]): string[] {
+    return ids.map((id) => this.d.roster.get(id).displayName);
+  }
+
+  /** The role an automatic message plays, worked out from the plan frozen on the boss's message. */
+  private roleOf(
+    kind: AutoKind,
+    turn: number | null,
+    plan: AutoPlan,
+    visible: MessageRow[],
+    triggerId: string,
+  ): Role | undefined {
+    const participants = this.names([...new Set(plan.order)]);
+    if (kind === 'discussion') {
+      const fresh = !visible.some(
+        (m) => m.role === 'agent' && m.status === 'succeeded' && m.triggerId !== triggerId,
+      );
+      return { kind: 'discuss', turn: turn ?? 0, participants, fresh };
+    }
+    if (kind === 'summary') return { kind: 'summary', participants };
+    return undefined;
+  }
+
+  /**
+   * The prompt for a call that is already in the database: used when it runs and when it is retried,
+   * so both send exactly the same thing.
+   */
+  private async promptForRow(
+    row: MessageRow,
+    seen: MessageRow[],
+    trigger: MessageRow,
+  ): Promise<Prompt | null> {
+    const visible = seen.filter((m) => m.id !== trigger.id);
+    const agentId = row.agentId!;
+    if (row.autoKind === 'review') {
+      if (!row.reviewAssetId || row.reviewVersion === null) return null;
+      const asset = await this.repo.getAssetVersion(row.reviewAssetId, row.reviewVersion);
+      if (!asset) return null;
+      return this.makePrompt(agentId, visible, trigger.content, undefined, {
+        role: { kind: 'review' },
+        reviewTarget: {
+          role: 'agent',
+          agentName: 'the conclusion the boss selected',
+          content: `${asset.title}\n\n${asset.content}`,
+        },
+      });
+    }
+    const target = row.replyToId ? visible.find((m) => m.id === row.replyToId) : undefined;
+    const plan = trigger.autoPlan;
+    const role =
+      row.autoKind && plan
+        ? this.roleOf(row.autoKind, row.autoTurn, plan, visible, trigger.id)
+        : undefined;
+    return this.makePrompt(agentId, visible, trigger.content, target, { role });
+  }
+
+  private outputLimitOf(row: Pick<MessageRow, 'agentConfig'>): number {
+    const cfg = row.agentConfig as { maxOutputTokens?: number } | null;
+    return cfg?.maxOutputTokens ?? this.d.pricing.maxOutputTokens;
   }
 
   private plan(
@@ -187,13 +270,87 @@ export class DiscussionService {
     return req.mentions ?? parseMentions(req.content);
   }
 
+  /**
+   * An ask with no @-mention in a discussion that has participants starts an automatic discussion:
+   * who speaks in which turn is fixed now, so later changes to the settings cannot change it.
+   */
+  private autoPlanFor(
+    settings: ThreadSettings,
+    req: {
+      content: string;
+      mentions?: AgentId[];
+      kind?: 'user' | 'context';
+      replyToId?: string;
+      rounds?: number;
+    },
+  ): AutoPlan | null {
+    if (req.kind === 'context' || req.replyToId) return null;
+    if (this.targetsOf(req).length > 0) return null;
+    const ps = settings.participants;
+    if (ps.length === 0) return null;
+    const rounds = ps.length === 1 ? 1 : (req.rounds ?? settings.maxRounds);
+    return {
+      order: Array.from({ length: rounds }, () => ps).flat(),
+      summarizer: ps.length >= 2 ? ps[0]! : null,
+    };
+  }
+
+  /** The most an automatic discussion could run: every turn at full length, then the summary. */
+  private planAuto(visible: MessageRow[], content: string, plan: AutoPlan): PlannedCall[] {
+    const everyone = [...new Set(plan.order)];
+    const unhired = everyone.filter((t) => !this.d.roster.get(t).hired);
+    if (unhired.length > 0) {
+      throw new HttpError(400, 'agent_not_hired', `Not hired yet: ${unhired.join(', ')}.`, {
+        agents: unhired,
+      });
+    }
+    const out = this.cfg.autoMaxOutputTokens;
+    const turns: { agentId: AgentId; kind: AutoKind; turn: number }[] = plan.order.map(
+      (agentId, turn) => ({
+        agentId,
+        kind: 'discussion',
+        turn,
+      }),
+    );
+    if (plan.summarizer)
+      turns.push({ agentId: plan.summarizer, kind: 'summary', turn: plan.order.length });
+    return turns.map((t) => {
+      const role = this.roleOf(t.kind, t.turn, plan, visible, 'pending');
+      const prompt = this.makePrompt(t.agentId, visible, content, undefined, { role });
+      // Each earlier turn adds up to `out` tokens to what this one has to read.
+      const inputTokens =
+        this.d.pricing.estimateInputTokens(prompt.system + prompt.user) + t.turn * out;
+      if (inputTokens > this.cfg.maxInputTokens) {
+        throw new HttpError(
+          413,
+          'context_too_large',
+          'The discussion plus the pasted material is too long to send. Shorten the pasted text or start a new discussion.',
+          { inputTokens, limit: this.cfg.maxInputTokens },
+        );
+      }
+      return {
+        agentId: t.agentId,
+        inputTokens,
+        maxOutputTokens: out,
+        estimatedCostMicro: this.d.pricing.estimateCostMicro(t.agentId, inputTokens, out),
+        prompt,
+      };
+    });
+  }
+
   async estimate(threadId: string, req: EstimateRequest): Promise<EstimateResponse> {
     const thread = await this.repo.getThread(threadId);
     if (!thread) throw new HttpError(404, 'thread_not_found', 'No such discussion.');
     const visible = this.visibleTo(await this.repo.listMessages(threadId));
-    const calls = this.plan(visible, req.content, this.targetsOf(req), req.replyToId);
+    const auto = this.autoPlanFor(thread, req);
+    const calls = auto
+      ? this.planAuto(visible, req.content, auto)
+      : this.plan(visible, req.content, this.targetsOf(req), req.replyToId);
     const totalMicro = calls.reduce((s, c) => s + c.estimatedCostMicro, 0);
     return {
+      ...(auto
+        ? { auto: { maxTurns: calls.length, includesSummary: auto.summarizer !== null } }
+        : {}),
       calls: calls.map((c) => ({
         agentId: c.agentId,
         inputTokens: c.inputTokens,
@@ -217,7 +374,10 @@ export class DiscussionService {
       if (existing.length > 0) return { deduplicated: true, rows: existing };
 
       const visible = this.visibleTo(await tx.messages());
-      const calls = this.plan(visible, req.content, targets, req.replyToId);
+      const auto = this.autoPlanFor(tx.settings, req);
+      const calls = auto
+        ? this.planAuto(visible, req.content, auto)
+        : this.plan(visible, req.content, targets, req.replyToId);
       const totalMicro = calls.reduce((s, c) => s + c.estimatedCostMicro, 0);
       if (req.acceptedMaxCostMicro !== undefined && totalMicro > req.acceptedMaxCostMicro) {
         throw new HttpError(
@@ -243,15 +403,18 @@ export class DiscussionService {
           status: 'sent',
           clientRequestId: req.clientRequestId,
           replyToId: req.replyToId,
+          autoPlan: auto ?? undefined,
         },
       ]);
       // Every call from this send is shown the same snapshot, whatever order they finish in.
       const seen = [...visible.map((m) => m.id), user!.id];
+      // An automatic discussion starts with its first turn; each finished turn creates the next.
+      const first = auto ? calls.slice(0, 1) : calls;
       const agentRows =
-        calls.length === 0
+        first.length === 0
           ? []
           : await tx.insert(
-              calls.map((c) => {
+              first.map((c) => {
                 const agent = this.d.roster.get(c.agentId);
                 return {
                   role: 'agent' as const,
@@ -268,6 +431,7 @@ export class DiscussionService {
                     maxOutputTokens: c.maxOutputTokens,
                   },
                   estimatedCostMicro: c.estimatedCostMicro,
+                  ...(auto ? { autoKind: 'discussion' as const, autoTurn: 0 } : {}),
                 };
               }),
             );
@@ -312,14 +476,14 @@ export class DiscussionService {
         await finish(fail('missing_context', 'The message that started this call is gone.', 0));
         return { ran: true };
       }
-      const visible = seen.filter((m) => m.id !== trigger.id);
-      const target = claimed.replyToId
-        ? visible.find((m) => m.id === claimed.replyToId)
-        : undefined;
-      const prompt = this.makePrompt(agentId, visible, trigger.content, target);
+      const prompt = await this.promptForRow(claimed, seen, trigger);
+      if (!prompt) {
+        await finish(fail('missing_context', 'The text this call was meant to check is gone.', 0));
+        return { ran: true };
+      }
       await this.repo.savePrompt(messageId, attempt, prompt);
 
-      const maxOutputTokens = this.d.pricing.maxOutputTokens;
+      const maxOutputTokens = this.outputLimitOf(claimed);
       try {
         const r = await this.d.providers[agent.providerId].call({
           model: agent.model,
@@ -332,7 +496,32 @@ export class DiscussionService {
         const costMicro = r.usage ? this.d.pricing.actualCostMicro(agentId, r.usage) : null;
         const common = { usage: r.usage, costMicro, costIsEstimate: r.usage === null };
         if (r.finish === 'complete') {
-          await finish({ status: 'succeeded', content: r.text, error: null, ...common });
+          let text = r.text;
+          let autoDone: boolean | null = null;
+          if (claimed.autoKind === 'discussion') {
+            const v = splitVerdict(r.text);
+            text = v.content;
+            autoDone = v.done;
+          }
+          if (text === '') {
+            await finish({
+              status: 'bad_format',
+              content: r.text,
+              error: { code: 'empty', message: RUN_ERRORS.empty },
+              ...common,
+            });
+          } else {
+            const done = await finish({
+              status: 'succeeded',
+              content: text,
+              error: null,
+              autoDone,
+              ...common,
+            });
+            // Hand over to the next turn. A failure here is picked up by the reconcile sweep.
+            if (done)
+              await this.continueChain(done).catch((e) => this.d.log?.('continue failed', e));
+          }
         } else {
           await finish({
             status: 'bad_format',
@@ -399,14 +588,15 @@ export class DiscussionService {
     const trigger = seen.find((m) => m.id === row.triggerId);
     if (!trigger)
       throw new HttpError(409, 'missing_context', 'The message that started this call is gone.');
-    const visible = seen.filter((m) => m.id !== trigger.id);
-    const target = row.replyToId ? visible.find((m) => m.id === row.replyToId) : undefined;
-    const prompt = this.makePrompt(agentId, visible, trigger.content, target);
+    const prompt = await this.promptForRow(row, seen, trigger);
+    if (!prompt) {
+      throw new HttpError(409, 'missing_context', 'The text this call was meant to check is gone.');
+    }
     const inputTokens = this.d.pricing.estimateInputTokens(prompt.system + prompt.user);
     const estimate = this.d.pricing.estimateCostMicro(
       agentId,
       inputTokens,
-      this.d.pricing.maxOutputTokens,
+      this.outputLimitOf(row),
     );
 
     const requeued = await this.repo.withThread(row.threadId, async (tx) => {
@@ -467,8 +657,165 @@ export class DiscussionService {
 
   // ---- conclusions ---------------------------------------------------------------------------
 
-  saveConclusion(threadId: string, req: SaveConclusionRequest): Promise<AssetVersionView> {
-    return this.repo.withThread(threadId, (tx) => tx.saveConclusion(req));
+  /** Saves the conclusion; if the discussion has a reviewer, asks them to check it right away. */
+  async saveConclusion(threadId: string, req: SaveConclusionRequest): Promise<AssetVersionView> {
+    const out = await this.repo.withThread(threadId, async (tx) => {
+      const saved = await tx.saveConclusion(req);
+      const review = tx.settings.reviewer ? await this.createReview(tx, saved) : null;
+      return { saved, review };
+    });
+    if (out.review?.status === 'queued') await this.dispatch(out.review);
+    return out.saved;
+  }
+
+  // ---- automatic discussion ------------------------------------------------------------------
+
+  /**
+   * After a discussion turn: stop (and summarize) when the AIs have run out of things to say or the
+   * round limit is reached, otherwise create the next turn. A turn can only be created once
+   * ((trigger, turn) is unique), so a retry, a duplicate event and the reconcile sweep are harmless.
+   */
+  private async continueChain(row: MessageRow): Promise<void> {
+    if (row.autoKind !== 'discussion' || row.autoTurn === null) return;
+    if (row.status !== 'succeeded' || !row.triggerId) return;
+    const trigger = await this.repo.getMessage(row.triggerId);
+    const plan = trigger?.autoPlan;
+    if (!trigger || !plan) return;
+    const nextTurn = row.autoTurn + 1;
+    const created = await this.repo.withThread(row.threadId, async (tx) => {
+      const turns = await tx.turnsOf(trigger.id);
+      if (turns.some((t) => t.autoTurn === nextTurn)) return null;
+      const spoken = turns.filter((t) => t.autoKind === 'discussion');
+      const cycle = new Set(plan.order).size;
+      const lastCycle = spoken.slice(-cycle);
+      // Over once everyone has spoken, at least one more full round happened, and in the latest
+      // round every AI said it had nothing more worth adding.
+      const converged =
+        spoken.length > cycle &&
+        lastCycle.length === cycle &&
+        lastCycle.every((t) => t.status === 'succeeded' && t.autoDone === true);
+      if (nextTurn >= plan.order.length || converged) {
+        if (!plan.summarizer) return null;
+        return this.createAutoTurn(tx, trigger, plan, nextTurn, plan.summarizer, 'summary');
+      }
+      return this.createAutoTurn(tx, trigger, plan, nextTurn, plan.order[nextTurn]!, 'discussion');
+    });
+    if (created?.status === 'queued') await this.dispatch(created);
+  }
+
+  /**
+   * Creates the next automatic call. One that cannot be afforded (or whose AI is gone) is stored as a
+   * failed message instead of being skipped, so the boss sees why the discussion stopped and can retry.
+   */
+  private async createAutoTurn(
+    tx: ThreadTx,
+    trigger: MessageRow,
+    plan: AutoPlan,
+    turn: number,
+    agentId: AgentId,
+    kind: 'discussion' | 'summary',
+  ): Promise<MessageRow | null> {
+    const visible = this.visibleTo(await tx.messages());
+    const role = this.roleOf(kind, turn, plan, visible, trigger.id);
+    const prompt = this.makePrompt(
+      agentId,
+      visible.filter((m) => m.id !== trigger.id),
+      trigger.content,
+      undefined,
+      { role },
+    );
+    return this.insertAutoCall(tx, {
+      agentId,
+      prompt,
+      triggerId: trigger.id,
+      seen: visible.map((m) => m.id),
+      autoKind: kind,
+      autoTurn: turn,
+    });
+  }
+
+  private async insertAutoCall(
+    tx: ThreadTx,
+    c: {
+      agentId: AgentId;
+      prompt: Prompt;
+      triggerId: string;
+      seen: string[];
+      autoKind: AutoKind;
+      autoTurn?: number;
+      reviewAssetId?: string;
+      reviewVersion?: number;
+    },
+  ): Promise<MessageRow | null> {
+    const agent = this.d.roster.get(c.agentId);
+    const out = this.cfg.autoMaxOutputTokens;
+    const inputTokens = this.d.pricing.estimateInputTokens(c.prompt.system + c.prompt.user);
+    const estimate = this.d.pricing.estimateCostMicro(c.agentId, inputTokens, out);
+    const base = {
+      role: 'agent' as const,
+      agentId: c.agentId,
+      triggerId: c.triggerId,
+      content: '',
+      seenMessageIds: c.seen,
+      autoKind: c.autoKind,
+      autoTurn: c.autoTurn,
+      reviewAssetId: c.reviewAssetId,
+      reviewVersion: c.reviewVersion,
+      estimatedCostMicro: estimate,
+      agentConfig: {
+        provider: agent.provider,
+        model: agent.model,
+        promptVersion: c.prompt.version,
+        maxOutputTokens: out,
+      },
+    };
+    const failed = (code: string, message: string) =>
+      tx.insertOnce({ ...base, status: 'failed', error: { code, message } });
+    if (!agent.hired) return failed('agent_not_hired', 'This AI is no longer set up.');
+    if (inputTokens > this.cfg.maxInputTokens) {
+      return failed('context_too_large', 'The discussion has become too long to send.');
+    }
+    if ((await tx.spentMicro()) + estimate > tx.budgetLimitMicro) {
+      return failed('over_budget', 'This would go over the discussion budget.');
+    }
+    return tx.insertOnce({ ...base, status: 'queued' });
+  }
+
+  private async createReview(tx: ThreadTx, saved: AssetVersionView): Promise<MessageRow | null> {
+    const reviewer = tx.settings.reviewer!;
+    const visible = this.visibleTo(await tx.messages());
+    const task = `請檢核我剛選定的結論「${saved.title}」（v${saved.version}）。`;
+    const [trigger] = await tx.insert([
+      { role: 'user', content: task, status: 'sent', autoKind: 'review_request' },
+    ]);
+    const prompt = this.makePrompt(reviewer, visible, task, undefined, {
+      role: { kind: 'review' },
+      reviewTarget: {
+        role: 'agent',
+        agentName: 'the conclusion the boss selected',
+        content: `${saved.title}\n\n${saved.content}`,
+      },
+    });
+    return this.insertAutoCall(tx, {
+      agentId: reviewer,
+      prompt,
+      triggerId: trigger!.id,
+      seen: [...visible.map((m) => m.id), trigger!.id],
+      autoKind: 'review',
+      reviewAssetId: saved.assetId,
+      reviewVersion: saved.version,
+    });
+  }
+
+  /** Picks up what a lost hand-off left behind: a finished turn with no next step, a call never started. */
+  async reconcile(): Promise<{ continued: number; redispatched: number }> {
+    const stalled = await this.repo.listStalledTurns(this.cfg.staleChainMs);
+    for (const row of stalled) {
+      await this.continueChain(row).catch((e) => this.d.log?.('continue failed', e));
+    }
+    const lost = await this.repo.listLostQueued(this.cfg.staleQueuedMs);
+    for (const row of lost) await this.dispatch(row);
+    return { continued: stalled.length, redispatched: lost.length };
   }
 
   async listConclusions(threadId: string): Promise<AssetVersionView[]> {

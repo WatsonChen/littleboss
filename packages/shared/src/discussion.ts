@@ -37,6 +37,13 @@ export const MessageView = z.object({
   replyToId: z.string().nullable(),
   /** The person's message that started this call. */
   triggerId: z.string().nullable(),
+  /**
+   * Set on messages the system produced on its own: an AI turn in an automatic discussion, the
+   * summary after it, a reviewer's check, or the boss-side note that asked for the check.
+   */
+  autoKind: z.enum(['discussion', 'summary', 'review', 'review_request']).nullable(),
+  /** The AI's own verdict for a discussion turn: true means it had nothing more worth adding. */
+  autoDone: z.boolean().nullable(),
   content: z.string(),
   status: MessageStatus,
   error: z.object({ code: z.string(), message: z.string() }).passthrough().nullable(),
@@ -62,6 +69,12 @@ export const ThreadSummary = z.object({
   spentMicro: z.number(),
   updatedAt: z.string(),
   messageCount: z.number().int(),
+  /** AIs that discuss on their own when the boss asks something without @-mentioning anyone. */
+  participants: z.array(AgentId),
+  /** Checks a conclusion automatically when the boss saves one. */
+  reviewer: AgentId.nullable(),
+  /** Upper limit of discussion rounds, not a target: the AIs stop early when nothing is left to add. */
+  maxRounds: z.number().int(),
 });
 export type ThreadSummary = z.infer<typeof ThreadSummary>;
 
@@ -75,6 +88,9 @@ export type ThreadDetail = z.infer<typeof ThreadDetail>;
 export const CreateThreadRequest = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   budgetLimitMicro: z.number().int().min(0).max(1_000_000_000).optional(),
+  participants: z.array(AgentId).max(3).optional(),
+  reviewer: AgentId.nullable().optional(),
+  maxRounds: z.number().int().min(1).max(4).optional(),
 });
 export type CreateThreadRequest = z.infer<typeof CreateThreadRequest>;
 
@@ -89,6 +105,8 @@ export const EstimateRequest = z.object({
   mentions: z.array(AgentId).max(3).optional(),
   /** Same as in SendMessageRequest: the review target changes what is sent, so it changes the estimate. */
   replyToId: z.string().uuid().optional(),
+  /** Overrides the discussion's round limit for this ask (e.g. "one more round"). */
+  rounds: z.number().int().min(1).max(4).optional(),
 });
 export type EstimateRequest = z.infer<typeof EstimateRequest>;
 
@@ -106,6 +124,8 @@ export const EstimateResponse = z.object({
   withinBudget: z.boolean(),
   /** Always true in M1: provider prices are configured by hand and usage is only known afterwards. */
   isEstimate: z.literal(true),
+  /** Present when the ask starts an automatic discussion: the calls are the most it could run. */
+  auto: z.object({ maxTurns: z.number().int(), includesSummary: z.boolean() }).optional(),
 });
 export type EstimateResponse = z.infer<typeof EstimateResponse>;
 
@@ -119,6 +139,7 @@ export const SendMessageRequest = z.object({
   replyToId: z.string().uuid().optional(),
   /** The total the person accepted when they saw the estimate. A higher estimate is refused. */
   acceptedMaxCostMicro: z.number().int().min(0).optional(),
+  rounds: z.number().int().min(1).max(4).optional(),
 });
 export type SendMessageRequest = z.infer<typeof SendMessageRequest>;
 

@@ -3,6 +3,19 @@ import type { ThreadDetail } from '@littleboss/shared';
 import type { ApiClient } from '../api';
 import { isActive } from './format';
 
+const CHAIN_GRACE_MS = 15_000;
+
+/**
+ * True right after an automatic discussion turn finished: its next turn is created by the server a
+ * moment later, so the screen keeps asking for a little while instead of looking finished.
+ */
+export function chainMayContinue(messages: ThreadDetail['messages'], now: number): boolean {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'agent' || last.autoKind !== 'discussion') return false;
+  if (last.status !== 'succeeded' || !last.finishedAt) return false;
+  return now - Date.parse(last.finishedAt) < CHAIN_GRACE_MS;
+}
+
 const POLL_MS = 2000;
 
 /** Loads a discussion and keeps it fresh while any AI call is still waiting or running. */
@@ -35,7 +48,9 @@ export function useThread(client: ApiClient, threadId: string) {
     };
   }, [refresh]);
 
-  const waiting = detail?.messages.some(isActive) ?? false;
+  const waiting =
+    (detail?.messages.some(isActive) || chainMayContinue(detail?.messages ?? [], Date.now())) ??
+    false;
   useEffect(() => {
     if (!waiting) return;
     const t = setTimeout(() => void refresh(), POLL_MS);

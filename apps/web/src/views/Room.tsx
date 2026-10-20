@@ -10,6 +10,7 @@ import { ConclusionSheet, ConclusionsSheet, ConfirmSheet } from './RoomSheets';
 import { HandoffSheet, RunsSheet } from './RunSheets';
 
 const DEFAULT_TITLE = '新的討論';
+const MORE_ROUND_TEXT = '請針對還沒解決的分歧和問題，再討論一輪。';
 
 export function Room({
   client,
@@ -27,6 +28,8 @@ export function Room({
   const [handoff, setHandoff] = useState<AssetVersionView | null>(null);
   const [mode, setMode] = useState<'user' | 'context'>('user');
   const [text, setText] = useState('');
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [moreText, setMoreText] = useState('');
   const [replyTo, setReplyTo] = useState<MessageView | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
@@ -59,6 +62,8 @@ export function Room({
         if (first && !res.deduplicated) {
           setText('');
           setReplyTo(null);
+          setMoreOpen(false);
+          setMoreText('');
           // Name a fresh discussion after its first message.
           if (titleRef.current === DEFAULT_TITLE && first.role === 'user') {
             void client
@@ -89,6 +94,14 @@ export function Room({
   const hired = agents.filter((a) => a.hired);
   const selectedMsgs = messages.filter((m) => selected.includes(m.id));
   const busy = flowState.step === 'estimating' || flowState.step === 'sending';
+  const nameOf = (id: string) => agents.find((a) => a.id === id)?.displayName ?? id;
+  const autoOn = thread.participants.length > 0;
+  const discussing = thread.participants.length >= 2;
+  // "One more round" is offered once the AIs have stopped, and only after they have discussed before.
+  const canMoreRound =
+    discussing &&
+    !messages.some(isActive) &&
+    messages.some((m) => m.autoKind === 'summary' || m.autoKind === 'discussion');
 
   const insertMention = (a: AgentInfo) => {
     setText((t) => `${t}${t && !/\s$/.test(t) ? ' ' : ''}@${a.displayName} `);
@@ -152,8 +165,19 @@ export function Room({
           <span key={a.id} className={`chip ${a.hired ? 'chip-agent' : 'chip-off'}`}>
             {a.displayName}
             {!a.hired && '（尚未聘用）'}
+            {thread.participants.includes(a.id) && thread.participants.length > 0 && ' · 討論'}
+            {thread.reviewer === a.id && ' · 檢核'}
           </span>
         ))}
+        {autoOn && (
+          <p className="muted small">
+            {discussing
+              ? `你提問後，${thread.participants.map(nameOf).join('、')} 會自動輪流討論（最多 ${thread.maxRounds} 輪，沒新東西會提早結束），最後附小結。`
+              : `${nameOf(thread.participants[0]!)} 會直接回答你的提問。`}
+            {thread.reviewer ? `你存成結論後，${nameOf(thread.reviewer)} 會自動檢核。` : ''}用 @
+            點名則只叫那一位。
+          </p>
+        )}
         {hired.length < 2 && (
           <p className="muted small">
             要讓 AI 互相檢查，至少需要聘用兩位。目前有 {hired.length} 位。
@@ -195,6 +219,46 @@ export function Room({
           <button className="btn-quiet" onClick={() => setSelected([])}>
             清除
           </button>
+        </div>
+      )}
+
+      {canMoreRound && (
+        <div className="more-round">
+          {!moreOpen ? (
+            <button className="btn-secondary" onClick={() => setMoreOpen(true)}>
+              再討論一輪
+            </button>
+          ) : (
+            <>
+              <label className="field">
+                想讓它們聚焦什麼？（可留空）
+                <textarea
+                  rows={2}
+                  value={moreText}
+                  onChange={(e) => setMoreText(e.target.value)}
+                  placeholder={MORE_ROUND_TEXT}
+                />
+              </label>
+              <div className="row">
+                <button
+                  className="btn-primary"
+                  disabled={busy}
+                  onClick={() =>
+                    void flow.begin({
+                      content: moreText.trim() || MORE_ROUND_TEXT,
+                      kind: 'user',
+                      rounds: 1,
+                    })
+                  }
+                >
+                  {flowState.step === 'estimating' ? '估算中…' : '開始這一輪'}
+                </button>
+                <button className="btn-quiet" onClick={() => setMoreOpen(false)}>
+                  取消
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -261,7 +325,9 @@ export function Room({
           placeholder={
             mode === 'context'
               ? '貼上對話紀錄或背景資料。這只會記下來，不會呼叫 AI，也不用錢。'
-              : '輸入問題，用 @ 點名誰要回答。沒有點名就只是記筆記。'
+              : autoOn
+                ? '輸入問題，AI 會自動討論。用 @ 點名則只叫那一位。'
+                : '輸入問題，用 @ 點名誰要回答。沒有點名就只是記筆記。'
           }
           aria-label={mode === 'context' ? '背景資料' : '訊息'}
           onKeyDown={(e) => {
@@ -298,7 +364,11 @@ export function Room({
             setSheet(null);
             setNotice(null);
             await loadConclusions();
-            setNotice(`已存成「${saved.title}」v${saved.version}`);
+            setNotice(
+              `已存成「${saved.title}」v${saved.version}` +
+                (thread.reviewer ? `，${nameOf(thread.reviewer)} 正在檢核` : ''),
+            );
+            await refresh();
           }}
         />
       )}
@@ -318,7 +388,11 @@ export function Room({
             const saved = await client.saveConclusion(threadId, input);
             await loadConclusions();
             setSheet({ kind: 'list' });
-            setNotice(`已存成「${saved.title}」v${saved.version}`);
+            setNotice(
+              `已存成「${saved.title}」v${saved.version}` +
+                (thread.reviewer ? `，${nameOf(thread.reviewer)} 正在檢核` : ''),
+            );
+            await refresh();
           }}
         />
       )}
