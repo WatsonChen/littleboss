@@ -168,19 +168,10 @@ export class DiscussionService {
   }
 
   /** The role an automatic message plays, worked out from the plan frozen on the boss's message. */
-  private roleOf(
-    kind: AutoKind,
-    turn: number | null,
-    plan: AutoPlan,
-    visible: MessageRow[],
-    triggerId: string,
-  ): Role | undefined {
+  private roleOf(kind: AutoKind, turn: number | null, plan: AutoPlan): Role | undefined {
     const participants = this.names([...new Set(plan.order)]);
     if (kind === 'discussion') {
-      const fresh = !visible.some(
-        (m) => m.role === 'agent' && m.status === 'succeeded' && m.triggerId !== triggerId,
-      );
-      return { kind: 'discuss', turn: turn ?? 0, participants, fresh };
+      return { kind: 'discuss', turn: turn ?? 0, participants };
     }
     if (kind === 'summary') return { kind: 'summary', participants };
     return undefined;
@@ -212,10 +203,7 @@ export class DiscussionService {
     }
     const target = row.replyToId ? visible.find((m) => m.id === row.replyToId) : undefined;
     const plan = trigger.autoPlan;
-    const role =
-      row.autoKind && plan
-        ? this.roleOf(row.autoKind, row.autoTurn, plan, visible, trigger.id)
-        : undefined;
+    const role = row.autoKind && plan ? this.roleOf(row.autoKind, row.autoTurn, plan) : undefined;
     return this.makePrompt(agentId, visible, trigger.content, target, { role });
   }
 
@@ -271,8 +259,10 @@ export class DiscussionService {
   }
 
   /**
-   * An ask with no @-mention in a discussion that has participants starts an automatic discussion:
-   * who speaks in which turn is fixed now, so later changes to the settings cannot change it.
+   * In a discussion that has participants, an ask starts an automatic discussion unless it @-mentions
+   * exactly one AI (that one answers alone, as before). Mentioning two or more picks who takes part,
+   * in the order they are named; no mention means the thread's own participants.
+   * Who speaks in which turn is fixed now, so later changes to the settings cannot change it.
    */
   private autoPlanFor(
     settings: ThreadSettings,
@@ -285,9 +275,10 @@ export class DiscussionService {
     },
   ): AutoPlan | null {
     if (req.kind === 'context' || req.replyToId) return null;
-    if (this.targetsOf(req).length > 0) return null;
-    const ps = settings.participants;
-    if (ps.length === 0) return null;
+    if (settings.participants.length === 0) return null;
+    const targets = this.targetsOf(req);
+    if (targets.length === 1) return null;
+    const ps = targets.length >= 2 ? targets : settings.participants;
     const rounds = ps.length === 1 ? 1 : (req.rounds ?? settings.maxRounds);
     return {
       order: Array.from({ length: rounds }, () => ps).flat(),
@@ -315,7 +306,7 @@ export class DiscussionService {
     if (plan.summarizer)
       turns.push({ agentId: plan.summarizer, kind: 'summary', turn: plan.order.length });
     return turns.map((t) => {
-      const role = this.roleOf(t.kind, t.turn, plan, visible, 'pending');
+      const role = this.roleOf(t.kind, t.turn, plan);
       const prompt = this.makePrompt(t.agentId, visible, content, undefined, { role });
       // Each earlier turn adds up to `out` tokens to what this one has to read.
       const inputTokens =
@@ -716,7 +707,7 @@ export class DiscussionService {
     kind: 'discussion' | 'summary',
   ): Promise<MessageRow | null> {
     const visible = this.visibleTo(await tx.messages());
-    const role = this.roleOf(kind, turn, plan, visible, trigger.id);
+    const role = this.roleOf(kind, turn, plan);
     const prompt = this.makePrompt(
       agentId,
       visible.filter((m) => m.id !== trigger.id),

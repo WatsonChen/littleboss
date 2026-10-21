@@ -113,15 +113,17 @@ describe.skipIf(!TEST_DATABASE_URL)('automatic discussion (real Postgres)', () =
     ]);
   });
 
-  it('each AI sees what the others said, and is told to add something new after the first round', async () => {
+  it('each AI sees what the others said; every turn after the first is a cross-examination, not a second answer', async () => {
     await ask();
     await kit.dispatcher.idle();
     const gptSecond = kit.providers.openai.calls[0]!;
     expect(gptSecond.user).toContain('Claude 第1次發言');
-    expect(gptSecond.system).toContain('You speak after others');
+    expect(gptSecond.system).toContain('cross-examination');
+    expect(gptSecond.system).toContain('Do NOT write your own full answer');
+    expect(kit.providers.anthropic.calls[0]!.system).toContain('You speak first');
     const claudeSecond = kit.providers.anthropic.calls[1]!;
     expect(claudeSecond.user).toContain('GPT 第1次發言');
-    expect(claudeSecond.system).toContain('Every reply must add something new');
+    expect(claudeSecond.system).toContain('cross-examination');
     expect(claudeSecond.system).toContain(`exactly "NEXT: done"`);
   });
 
@@ -141,6 +143,22 @@ describe.skipIf(!TEST_DATABASE_URL)('automatic discussion (real Postgres)', () =
     const ms = agents(await thread());
     expect(ms).toHaveLength(1);
     expect(ms[0]).toMatchObject({ agentId: 'gpt', autoKind: null });
+  });
+
+  it('naming two AIs with @ starts a discussion between them, in the order named', async () => {
+    const r = await ask('@gpt @claude 你們討論一下');
+    expect(r.messages.map((m) => [m.role, m.agentId, m.autoKind])).toEqual([
+      ['user', null, null],
+      ['agent', 'gpt', 'discussion'],
+    ]);
+    await kit.dispatcher.idle();
+    expect(agents(await thread()).map((m) => [m.agentId, m.autoKind])).toEqual([
+      ['gpt', 'discussion'],
+      ['claude', 'discussion'],
+      ['gpt', 'discussion'],
+      ['claude', 'discussion'],
+      ['gpt', 'summary'],
+    ]);
   });
 
   it('the same request id never starts a second discussion', async () => {

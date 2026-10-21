@@ -11,7 +11,7 @@ export interface Prompt {
   version: number;
 }
 
-export const PROMPT_VERSION = 2;
+export const PROMPT_VERSION = 3;
 
 /**
  * Pasted text and other AIs' replies must not be able to close or fake our section tags.
@@ -26,8 +26,8 @@ const neutralize = (text: string) =>
 
 /** What an automatic call is for. Plain manual calls (@-mentions, "ask X to check") have none. */
 export type Role =
-  /** `fresh`: nobody has answered yet, so the first round only asks for a direct answer. */
-  | { kind: 'discuss'; turn: number; participants: string[]; fresh: boolean }
+  /** `turn` 0 opens the discussion; every later turn has to answer what was said before it. */
+  | { kind: 'discuss'; turn: number; participants: string[] }
   | { kind: 'summary'; participants: string[] }
   | { kind: 'review' };
 
@@ -48,22 +48,21 @@ function roleRules(role: Role): string[] {
       const others = role.participants.join(', ');
       const head = [
         `This is a discussion among AI employees (${others}). The boss's question is in <task>; <transcript> holds what everyone has said so far.`,
-        'Keep your reply under about 250 words, in the language the boss writes in.',
+        'Keep your reply short: about 250 English words or 400 Chinese characters at most. Write in the language the boss writes in. No long lists, no headings.',
       ];
-      if (role.fresh && role.turn < role.participants.length) {
-        // Everyone speaks at least once, so the first round only asks for a direct answer.
+      if (role.turn === 0) {
         return [
           ...head,
-          role.turn === 0
-            ? "You speak first: answer the boss's question directly and concretely."
-            : "You speak after others: answer the boss's question yourself, then point out where you agree or disagree with what was said, with reasons.",
+          "You speak first. Give your position on the boss's question as 3 to 5 numbered claims, each with its reason and the assumption it depends on. Others will test these claims, so make them specific enough to be challenged.",
           `End with a last line that is exactly "${NEXT_CONTINUE}".`,
         ];
       }
       return [
         ...head,
-        'Every reply must add something new: a point nobody made, a concrete correction, a disagreement with reasons, or an answer to a question another AI left open. Say which earlier claim you are responding to.',
-        'Do not repeat what was already said and do not simply agree. If you agree, say what you would still add or change.',
+        'This is a cross-examination, not a second answer. Do NOT write your own full answer to the boss from scratch.',
+        'First respond to the specific claims made before you, naming whose claim you mean (for example "Claude\'s claim 2"). For each claim you address, say whether you accept it, and if not, why: a hidden assumption, missing evidence, a risk, a counterexample, or a better alternative. Accepting a claim is fine, but say what it rests on.',
+        'Then, only if it changes the recommendation, add at most one point nobody has raised. Close with one sentence starting with "My position now:" (in the boss\'s language) saying what you would tell the boss after this exchange.',
+        'Do not repeat what was already said and do not simply agree.',
         `End with a last line that is exactly "${NEXT_CONTINUE}" if disagreements or open questions remain that another reply could improve, or exactly "${NEXT_DONE}" if nothing worth adding remains.`,
       ];
     }

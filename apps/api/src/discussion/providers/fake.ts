@@ -48,24 +48,24 @@ function demoDiscussion(req: ProviderRequest): ProviderResult | null {
   }
   if (req.system.includes('This is a discussion among AI employees')) {
     const first = req.system.includes('You speak first');
-    const after = req.system.includes('You speak after others');
     if (first) {
       return ok(
         `${label}${name}：針對「${task.slice(0, 40)}」，我建議先做 A，因為成本最低、最快能驗證。\nNEXT: continue`,
       );
     }
-    if (after) {
+    // Second speaker: challenges the first speaker's claim instead of giving its own answer.
+    if (said === 1) {
       return ok(
-        `${label}${name}：我同意要先驗證，但我認為 B 的風險比 A 低，理由是不依賴外部服務。\nNEXT: continue`,
+        `${label}${name}：我質疑上一位的主張 1：「A 成本最低」是假設不用外部服務，若要接外部服務成本會翻倍。我同意要先驗證，但風險上 B 較低。我現在的立場：先驗證 B。\nNEXT: continue`,
       );
     }
-    // Later rounds: the last speaker concedes, so the demo shows an early stop.
+    // Later turns: the last speaker concedes, so the demo shows an early stop.
     return said >= 3
       ? ok(
-          `${label}${name}：前面的分歧我接受「先做 A、並用 B 當備案」，沒有其他要補的了。\nNEXT: done`,
+          `${label}${name}：前面的分歧我接受「先做 A、並用 B 當備案」，沒有其他要補的了。我現在的立場：同上。\nNEXT: done`,
         )
       : ok(
-          `${label}${name}：針對 B 依賴較少這點，我補充：A 可以用現成工具完成，所以兩者差距沒那麼大。\nNEXT: continue`,
+          `${label}${name}：回應「B 依賴較少」這點：A 可以用現成工具完成，所以兩者差距沒那麼大。我現在的立場：A、B 都可，先 A。\nNEXT: continue`,
         );
   }
   return null;
