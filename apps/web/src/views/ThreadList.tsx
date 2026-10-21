@@ -34,6 +34,14 @@ export function ThreadList({ client }: { client: ApiClient }) {
           ＋ 新討論
         </button>
       </header>
+      <nav className="home-tools" aria-label="工具">
+        <a className="btn-secondary" href="#/capture">
+          📝 隨手捕捉
+        </a>
+        <a className="btn-secondary" href="#/shopping">
+          🛒 購物清單
+        </a>
+      </nav>
       {error && (
         <p className="error-box" role="alert">
           {error}{' '}

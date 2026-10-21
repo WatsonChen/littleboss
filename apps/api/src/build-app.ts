@@ -9,6 +9,9 @@ import { createAiCallFunction, createDiscussionReconcileFunction } from './discu
 import { createDiscussionService, type DiscussionService } from './discussion/index.js';
 import { HttpError } from './discussion/errors.js';
 import { registerDiscussionRoutes } from './discussion/routes.js';
+import { createCaptureFunctions } from './captures/engine.js';
+import { createCaptureService, type CaptureService } from './captures/index.js';
+import { registerCaptureRoutes } from './captures/routes.js';
 import { createRunFunctions } from './runs/engine.js';
 import { createRunService, type RunService } from './runs/index.js';
 import { registerRunRoutes } from './runs/routes.js';
@@ -17,6 +20,7 @@ export interface BuildAppOptions {
   /** Inject a ready service (tests). Otherwise one is created lazily from DATABASE_URL. */
   discussion?: DiscussionService;
   runs?: RunService;
+  captures?: CaptureService;
   env?: Record<string, string | undefined>;
 }
 
@@ -48,6 +52,7 @@ export function buildApp(opts: BuildAppOptions = {}) {
   // check and Inngest sync keep working while the database is not configured yet.
   let service = opts.discussion;
   let runService = opts.runs;
+  let captureService = opts.captures;
   let pool: Pool | undefined;
   const getPool = (): Pool => {
     if (pool) return pool;
@@ -67,10 +72,18 @@ export function buildApp(opts: BuildAppOptions = {}) {
     runService = createRunService(env, getPool());
     return runService;
   };
+  const getCaptures = (): CaptureService => {
+    if (captureService) return captureService;
+    captureService = createCaptureService(env, getPool());
+    return captureService;
+  };
   app.addHook('onClose', async () => {
     await pool?.end();
   });
-  registerDiscussionRoutes(app, getService, env, (api) => registerRunRoutes(api, getRuns));
+  registerDiscussionRoutes(app, getService, env, (api) => {
+    registerRunRoutes(api, getRuns);
+    registerCaptureRoutes(api, getCaptures);
+  });
 
   // Checks the database connection without exposing anything but whether it works and how fast.
   app.get('/health/db', async (_req, reply) => {
@@ -101,6 +114,7 @@ export function buildApp(opts: BuildAppOptions = {}) {
         createAiCallFunction(getService),
         createDiscussionReconcileFunction(getService),
         ...createRunFunctions(getRuns),
+        ...createCaptureFunctions(getCaptures),
       ],
     }),
   });

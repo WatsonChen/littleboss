@@ -2,6 +2,10 @@ import { z } from 'zod';
 import {
   AgentInfo,
   AssetVersionView,
+  CaptureItemResponse,
+  CaptureView,
+  CreateCaptureResponse,
+  ShoppingItemView,
   CallRecord,
   EstimateResponse,
   HealthResponse,
@@ -12,7 +16,10 @@ import {
   SubmitResponse,
   ThreadDetail,
   ThreadSummary,
+  type ApproveCaptureItemRequest,
+  type CreateCaptureRequest,
   type CreateRunRequest,
+  type EditCaptureItemRequest,
   type CreateThreadRequest,
   type EstimateRequest,
   type SaveConclusionRequest,
@@ -158,6 +165,37 @@ export function createApiClient(opts: ClientOptions = {}) {
       request('POST', `/api/runs/${runId}/input`, SubmitResponse, req),
     submitRunApproval: (runId: string, req: SubmitApprovalRequest) =>
       request('POST', `/api/runs/${runId}/approval`, SubmitResponse, req),
+    createCapture: (req: CreateCaptureRequest) =>
+      request('POST', '/api/captures', CreateCaptureResponse, req),
+    listCaptures: async () =>
+      (await request('GET', '/api/captures', z.object({ captures: z.array(CaptureView) })))
+        .captures,
+    getCapture: async (id: string) =>
+      (await request('GET', `/api/captures/${id}`, z.object({ capture: CaptureView }))).capture,
+    retryCapture: async (id: string) =>
+      (await request('POST', `/api/captures/${id}/retry`, z.object({ capture: CaptureView }), {}))
+        .capture,
+    editCaptureItem: async (id: string, itemId: string, req: EditCaptureItemRequest) =>
+      (
+        await request(
+          'PATCH',
+          `/api/captures/${id}/items/${itemId}`,
+          z.object({ capture: CaptureView }),
+          req,
+        )
+      ).capture,
+    approveCaptureItem: (id: string, itemId: string, req: ApproveCaptureItemRequest) =>
+      request('POST', `/api/captures/${id}/items/${itemId}/approve`, CaptureItemResponse, req),
+    rejectCaptureItem: (id: string, itemId: string) =>
+      request('POST', `/api/captures/${id}/items/${itemId}/reject`, CaptureItemResponse, {}),
+    listShopping: async () =>
+      (await request('GET', '/api/shopping', z.object({ items: z.array(ShoppingItemView) }))).items,
+    setShoppingDone: async (id: string, done: boolean) =>
+      (
+        await request('PATCH', `/api/shopping/${id}`, z.object({ item: ShoppingItemView }), {
+          done,
+        })
+      ).item,
     cancelRun: async (runId: string) =>
       (await request('POST', `/api/runs/${runId}/cancel`, z.object({ run: RunView }), {})).run,
   };

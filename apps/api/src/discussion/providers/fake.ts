@@ -13,6 +13,13 @@ export class FakeProvider implements ModelProvider {
   async call(req: ProviderRequest): Promise<ProviderResult> {
     this.calls.push(req);
     if (this.behaviour) return this.behaviour(req);
+    if (req.system.includes('<capture_task>')) {
+      return {
+        text: JSON.stringify(demoCapture(req.user)),
+        finish: 'complete',
+        usage: { inputTokens: Math.ceil(req.user.length / 2), outputTokens: 120 },
+      };
+    }
     const demo = demoDiscussion(req);
     if (demo) return demo;
     const task = /<task>\n([\s\S]*?)\n<\/task>/.exec(req.user)?.[1] ?? '';
@@ -69,4 +76,96 @@ function demoDiscussion(req: ProviderRequest): ProviderResult | null {
         );
   }
   return null;
+}
+
+/**
+ * A few plain rules that turn a typed note into the JSON a real model would return, so the capture
+ * flow can be tried without keys. Not smart: "買…" becomes shopping items, a sentence with a
+ * meeting-like word becomes an event, and a missing day or time stays empty (never guessed).
+ */
+export function demoCapture(user: string) {
+  const now = /<now>(.*?)<\/now>/.exec(user)?.[1] ?? '';
+  const text = /<capture_text>\n([\s\S]*?)\n<\/capture_text>/.exec(user)?.[1] ?? '';
+  const items: Record<string, unknown>[] = [];
+  for (const seg of text
+    .split(/[。\n;；]/)
+    .map((x) => x.trim())
+    .filter(Boolean)) {
+    const buy = /買(.+)/.exec(seg);
+    if (buy) {
+      for (const part of buy[1]!
+        .split(/[、,，和跟及]/)
+        .map((x) => x.trim())
+        .filter(Boolean)) {
+        items.push({
+          kind: 'shopping',
+          origin: 'said',
+          title: part,
+          note: '',
+          quantity: '',
+          startsAt: null,
+          endsAt: null,
+          allDay: false,
+          assumptions: [],
+          question: '',
+        });
+      }
+      continue;
+    }
+    if (/會|約|看診|聚餐|面試|開會|見面|吃飯/.test(seg)) {
+      const start = demoTime(seg, now);
+      items.push({
+        kind: 'event',
+        origin: 'said',
+        title: seg.slice(0, 40),
+        note: '',
+        quantity: '',
+        startsAt: start,
+        endsAt: null,
+        allDay: false,
+        assumptions: start ? ['（示範）時間由簡單規則換算'] : [],
+        question: start ? '' : '什麼時候？',
+      });
+    }
+  }
+  return {
+    items,
+    questions:
+      items.length === 0 ? ['（示範）我沒看出要買的東西或要排的行程，可以再說清楚一點嗎？'] : [],
+  };
+}
+
+function demoTime(seg: string, now: string): string | null {
+  const m = /^(\d{4}-\d{2}-\d{2})T[\d:]+([+-]\d{2}:\d{2})$/.exec(now);
+  if (!m) return null;
+  const offset = m[2]!;
+  const day = /今天/.test(seg) ? 0 : /明天/.test(seg) ? 1 : /後天/.test(seg) ? 2 : null;
+  const CN: Record<string, string> = {
+    一: '1',
+    二: '2',
+    兩: '2',
+    三: '3',
+    四: '4',
+    五: '5',
+    六: '6',
+    七: '7',
+    八: '8',
+    九: '9',
+    十: '10',
+    十一: '11',
+    十二: '12',
+  };
+  const num = seg.replace(
+    /(十[一二]|[一二兩三四五六七八九十])點/g,
+    (_m, c: string) => `${CN[c]}點`,
+  );
+  const t = /(\d{1,2})(?:[:點](\d{2})?)/.exec(num);
+  if (day === null || !t) return null;
+  let hour = Number(t[1]);
+  if (/下午|晚上/.test(seg) && hour < 12) hour += 12;
+  if (hour > 23) return null;
+  const d = new Date(`${m[1]}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + day);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.toISOString().slice(0, 10)}T${pad(hour)}:${pad(Number(t[2] ?? 0))}:00${offset}`;
 }
