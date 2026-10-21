@@ -12,6 +12,8 @@ import { registerDiscussionRoutes } from './discussion/routes.js';
 import { createCaptureFunctions } from './captures/engine.js';
 import { createCaptureService, type CaptureService } from './captures/index.js';
 import { registerCaptureRoutes } from './captures/routes.js';
+import { createFlowService, type FlowService } from './flows/index.js';
+import { registerFlowRoutes } from './flows/routes.js';
 import { createRunFunctions } from './runs/engine.js';
 import { createRunService, type RunService } from './runs/index.js';
 import { registerRunRoutes } from './runs/routes.js';
@@ -21,6 +23,7 @@ export interface BuildAppOptions {
   discussion?: DiscussionService;
   runs?: RunService;
   captures?: CaptureService;
+  flows?: FlowService;
   env?: Record<string, string | undefined>;
 }
 
@@ -53,6 +56,7 @@ export function buildApp(opts: BuildAppOptions = {}) {
   let service = opts.discussion;
   let runService = opts.runs;
   let captureService = opts.captures;
+  let flowService = opts.flows;
   let pool: Pool | undefined;
   const getPool = (): Pool => {
     if (pool) return pool;
@@ -77,12 +81,18 @@ export function buildApp(opts: BuildAppOptions = {}) {
     captureService = createCaptureService(env, getPool());
     return captureService;
   };
+  const getFlows = (): FlowService => {
+    if (flowService) return flowService;
+    flowService = createFlowService(env, getPool());
+    return flowService;
+  };
   app.addHook('onClose', async () => {
     await pool?.end();
   });
   registerDiscussionRoutes(app, getService, env, (api) => {
     registerRunRoutes(api, getRuns);
     registerCaptureRoutes(api, getCaptures);
+    registerFlowRoutes(api, getFlows);
   });
 
   // Checks the database connection without exposing anything but whether it works and how fast.
