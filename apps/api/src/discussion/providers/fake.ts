@@ -13,6 +13,13 @@ export class FakeProvider implements ModelProvider {
   async call(req: ProviderRequest): Promise<ProviderResult> {
     this.calls.push(req);
     if (this.behaviour) return this.behaviour(req);
+    if (req.system.includes('<flow_task>')) {
+      return {
+        text: JSON.stringify(demoDraft(req.user)),
+        finish: 'complete',
+        usage: { inputTokens: Math.ceil(req.user.length / 2), outputTokens: 200 },
+      };
+    }
     if (req.system.includes('<capture_task>')) {
       return {
         text: JSON.stringify(demoCapture(req.user)),
@@ -168,4 +175,26 @@ function demoTime(seg: string, now: string): string | null {
   d.setUTCDate(d.getUTCDate() + day);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.toISOString().slice(0, 10)}T${pad(hour)}:${pad(Number(t[2] ?? 0))}:00${offset}`;
+}
+
+/** Three plainly labelled sample options built from the first words of the notes. */
+export function demoDraft(user: string) {
+  const notes = /<notes>\n([\s\S]*?)\n<\/notes>/.exec(user)?.[1] ?? '';
+  const topic = notes.replace(/\s+/g, ' ').trim().slice(0, 18) || '這一集';
+  return {
+    options: [
+      {
+        title: `（示範）${topic}：我們聊了什麼`,
+        description: `（示範，不是真的 AI）這一集聊到：${notes.slice(0, 80)}`,
+      },
+      {
+        title: `（示範）關於${topic}，最大的收穫`,
+        description: '（示範，不是真的 AI）本集的重點整理與心得。',
+      },
+      {
+        title: `（示範）${topic}？我們的看法`,
+        description: '（示範，不是真的 AI）想知道我們怎麼想嗎？收聽本集。',
+      },
+    ],
+  };
 }

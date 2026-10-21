@@ -41,6 +41,9 @@ export function ThreadList({ client }: { client: ApiClient }) {
         <a className="btn-secondary" href="#/shopping">
           🛒 購物清單
         </a>
+        <a className="btn-secondary" href="#/flows">
+          🎙 流程
+        </a>
       </nav>
       {error && (
         <p className="error-box" role="alert">

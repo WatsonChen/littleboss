@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createApiClient } from './api';
 import { getToken, setToken } from './lib/auth';
 import { CaptureDetail, CaptureHome } from './views/Capture';
+import { FlowDetail, FlowHome } from './views/Flows';
 import { Room } from './views/Room';
 import { ShoppingList } from './views/Shopping';
 import { ThreadList } from './views/ThreadList';
 import { TokenGate } from './views/TokenGate';
 
 const CAPTURE = /^#\/capture(?:\/([0-9a-f-]{36}))?$/i;
+const FLOWS = /^#\/flows(?:\/([0-9a-f-]{36}))?$/i;
 const ROOM = /^#\/t\/([0-9a-f-]{36})(?:\/r\/([0-9a-f-]{36}))?$/i;
 
 function useHash() {
@@ -50,6 +52,14 @@ export function App() {
       <CaptureDetail key={`${capture[1]}-${epoch}`} client={client} id={capture[1]} />
     ) : (
       <CaptureHome key={epoch} client={client} />
+    );
+  }
+  const flows = FLOWS.exec(hash);
+  if (flows) {
+    return flows[1] ? (
+      <FlowDetail key={`${flows[1]}-${epoch}`} client={client} id={flows[1]} />
+    ) : (
+      <FlowHome key={epoch} client={client} />
     );
   }
   if (hash === '#/shopping') return <ShoppingList key={epoch} client={client} />;

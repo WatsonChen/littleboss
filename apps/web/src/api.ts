@@ -5,6 +5,9 @@ import {
   CaptureItemResponse,
   CaptureView,
   CreateCaptureResponse,
+  CreateFlowResponse,
+  FlowResponse,
+  FlowView,
   ShoppingItemView,
   CallRecord,
   EstimateResponse,
@@ -17,6 +20,9 @@ import {
   ThreadDetail,
   ThreadSummary,
   type ApproveCaptureItemRequest,
+  type ChooseFlowDraftRequest,
+  type CreateFlowRequest,
+  type SaveFlowInputsRequest,
   type CreateCaptureRequest,
   type CreateRunRequest,
   type EditCaptureItemRequest,
@@ -196,6 +202,20 @@ export function createApiClient(opts: ClientOptions = {}) {
           done,
         })
       ).item,
+    createFlow: (req: CreateFlowRequest) => request('POST', '/api/flows', CreateFlowResponse, req),
+    listFlows: async () =>
+      (await request('GET', '/api/flows', z.object({ flows: z.array(FlowView) }))).flows,
+    getFlow: async (id: string) => (await request('GET', `/api/flows/${id}`, FlowResponse)).flow,
+    saveFlowInputs: async (id: string, req: SaveFlowInputsRequest) =>
+      (await request('PATCH', `/api/flows/${id}`, FlowResponse, req)).flow,
+    generateFlowDraft: async (id: string) =>
+      (await request('POST', `/api/flows/${id}/generate`, FlowResponse, {})).flow,
+    chooseFlowDraft: async (id: string, req: ChooseFlowDraftRequest) =>
+      (await request('POST', `/api/flows/${id}/choose`, FlowResponse, req)).flow,
+    setFlowSchedule: async (id: string, publishAt: string | null) =>
+      (await request('POST', `/api/flows/${id}/schedule`, FlowResponse, { publishAt })).flow,
+    setFlowStepDone: async (id: string, key: string, done: boolean) =>
+      (await request('POST', `/api/flows/${id}/steps/${key}/done`, FlowResponse, { done })).flow,
     cancelRun: async (runId: string) =>
       (await request('POST', `/api/runs/${runId}/cancel`, z.object({ run: RunView }), {})).run,
   };
