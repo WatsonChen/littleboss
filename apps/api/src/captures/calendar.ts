@@ -14,7 +14,7 @@ export interface CalendarEventInput {
 export type CalendarWrite =
   | {
       status: 'created' | 'exists';
-      destination: 'google-calendar' | 'demo-calendar';
+      destination: 'google-calendar' | 'demo-calendar' | 'little-boss-calendar';
       demo: boolean;
       link: string | null;
     }
@@ -29,7 +29,7 @@ export type CalendarWrite =
  * makes the write idempotent.
  */
 export interface CalendarClient {
-  readonly kind: 'google' | 'demo' | 'none';
+  readonly kind: 'google' | 'demo' | 'app' | 'none';
   insert(e: CalendarEventInput): Promise<CalendarWrite>;
 }
 
@@ -37,6 +37,22 @@ export class NoCalendar implements CalendarClient {
   readonly kind = 'none' as const;
   async insert(): Promise<CalendarWrite> {
     return { status: 'not_connected' };
+  }
+}
+
+/**
+ * The event lives in little boss itself: the approved capture item is the record. Phones get it
+ * through an .ics link or the subscription feed, so any calendar app works without an account here.
+ */
+export class InAppCalendar implements CalendarClient {
+  readonly kind = 'app' as const;
+  async insert(): Promise<CalendarWrite> {
+    return {
+      status: 'created',
+      destination: 'little-boss-calendar',
+      demo: false,
+      link: null,
+    };
   }
 }
 

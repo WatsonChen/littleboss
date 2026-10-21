@@ -33,7 +33,8 @@ export interface CaptureRow {
 }
 
 export interface ItemResult {
-  destination: 'little-boss-shopping' | 'google-calendar' | 'demo-calendar';
+  destination:
+    'little-boss-shopping' | 'google-calendar' | 'demo-calendar' | 'little-boss-calendar';
   demo: boolean;
   link: string | null;
 }
@@ -201,6 +202,18 @@ export class CaptureRepository {
   async getItem(id: string): Promise<ItemRow | null> {
     const { rows } = await this.pool.query(`select * from capture_items where id=$1`, [id]);
     return rows[0] ? toItem(rows[0]) : null;
+  }
+
+  /** Approved events kept in little boss, soonest first: what the calendar feed shows. */
+  async listAppCalendarItems(limit = 1000): Promise<ItemRow[]> {
+    const { rows } = await this.pool.query(
+      `select * from capture_items
+        where kind = 'event' and status = 'saved'
+          and result->>'destination' = 'little-boss-calendar'
+        order by payload->>'startsAt' desc limit $1`,
+      [limit],
+    );
+    return rows.map(toItem);
   }
 
   // ---- reading the text (the one model call) ------------------------------------------------

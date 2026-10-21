@@ -53,7 +53,12 @@ export const CaptureItemView = z.object({
   /** Where it ended up, once saved. */
   result: z
     .object({
-      destination: z.enum(['little-boss-shopping', 'google-calendar', 'demo-calendar']),
+      destination: z.enum([
+        'little-boss-shopping',
+        'google-calendar',
+        'demo-calendar',
+        'little-boss-calendar',
+      ]),
       /** True when nothing really reached the outside service (demo mode). */
       demo: z.boolean(),
       link: z.string().nullable(),

@@ -5,7 +5,7 @@ import { createPricing } from '../discussion/pricing.js';
 import { createProviders } from '../discussion/providers/index.js';
 import { Roster } from '../discussion/roster.js';
 import { InlineRunEngine } from '../runs/engine.js';
-import { DemoCalendar, NoCalendar, type CalendarClient } from './calendar.js';
+import { DemoCalendar, InAppCalendar, type CalendarClient } from './calendar.js';
 import { InngestCaptureEngine } from './engine.js';
 import { CaptureRepository } from './repository.js';
 import { CaptureService, type CaptureEngine } from './service.js';
@@ -17,9 +17,9 @@ export function createCaptureEngine(env: Env): CaptureEngine {
   return mode === 'inngest' ? new InngestCaptureEngine() : new InlineRunEngine();
 }
 
-/** Demo mode writes to a demo table; otherwise nothing is written until Google is connected. */
+/** Demo mode writes to a demo table; otherwise events are kept in little boss (see InAppCalendar). */
 export function createCalendar(env: Env, pool: Pool): CalendarClient {
-  return env.LB_FAKE_PROVIDERS === '1' ? new DemoCalendar(pool) : new NoCalendar();
+  return env.LB_FAKE_PROVIDERS === '1' ? new DemoCalendar(pool) : new InAppCalendar();
 }
 
 export function createCaptureService(env: Env, pool: Pool): CaptureService {
