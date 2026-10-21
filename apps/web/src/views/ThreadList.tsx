@@ -3,11 +3,12 @@ import type { RunView, ThreadSummary } from '@littleboss/shared';
 import type { ApiClient } from '../api';
 import { formatUsd } from '../lib/format';
 import { runStateLabel } from '../lib/runs';
+import { NewThreadSheet } from './NewThreadSheet';
 
 export function ThreadList({ client }: { client: ApiClient }) {
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [newOpen, setNewOpen] = useState(false);
   const [waiting, setWaiting] = useState<RunView[]>([]);
 
   const load = useCallback(() => {
@@ -25,24 +26,11 @@ export function ThreadList({ client }: { client: ApiClient }) {
     client.listWaitingRuns().then(setWaiting, () => undefined);
   }, [client]);
 
-  async function create() {
-    if (creating) return;
-    setCreating(true);
-    try {
-      const t = await client.createThread({});
-      location.hash = `#/t/${t.id}`;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCreating(false);
-    }
-  }
-
   return (
     <main className="page">
       <header className="topbar">
         <h1>little boss</h1>
-        <button className="btn-primary" onClick={create} disabled={creating}>
+        <button className="btn-primary" onClick={() => setNewOpen(true)}>
           ＋ 新討論
         </button>
       </header>
@@ -79,6 +67,7 @@ export function ThreadList({ client }: { client: ApiClient }) {
             <a href={`#/t/${t.id}`}>
               <strong>{t.title}</strong>
               <span className="muted small">
+                {t.participants.length > 0 && `${t.participants.length} 位 AI · `}
                 {t.messageCount} 則 · 已用 {formatUsd(t.spentMicro)} /{' '}
                 {formatUsd(t.budgetLimitMicro)} ·{' '}
                 {new Date(t.updatedAt).toLocaleString('zh-TW', {
@@ -90,6 +79,16 @@ export function ThreadList({ client }: { client: ApiClient }) {
           </li>
         ))}
       </ul>
+      {newOpen && (
+        <NewThreadSheet
+          client={client}
+          onClose={() => setNewOpen(false)}
+          onCreate={async (req) => {
+            const t = await client.createThread(req);
+            location.hash = `#/t/${t.id}`;
+          }}
+        />
+      )}
     </main>
   );
 }

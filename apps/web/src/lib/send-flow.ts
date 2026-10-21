@@ -5,6 +5,8 @@ export interface Draft {
   content: string;
   kind: 'user' | 'context';
   replyToId?: string;
+  /** Overrides the discussion's round limit for this ask ("one more round"). */
+  rounds?: number;
 }
 
 export type SendFlowState =
@@ -57,6 +59,7 @@ export class SendFlow {
       const estimate = await this.client.estimate(this.threadId, {
         content: draft.content,
         replyToId: draft.replyToId,
+        rounds: draft.rounds,
       });
       this.pending.estimate = estimate;
       if (estimate.calls.length === 0) return this.submit();
@@ -93,6 +96,7 @@ export class SendFlow {
         kind: p.draft.kind,
         content: p.draft.content,
         replyToId: p.draft.replyToId,
+        rounds: p.draft.rounds,
         acceptedMaxCostMicro: p.estimate?.totalMicro,
       });
       this.pending = undefined;
@@ -105,6 +109,7 @@ export class SendFlow {
           const estimate = await this.client.estimate(this.threadId, {
             content: p.draft.content,
             replyToId: p.draft.replyToId,
+            rounds: p.draft.rounds,
           });
           p.estimate = estimate;
           this.set({

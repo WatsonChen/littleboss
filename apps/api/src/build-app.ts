@@ -5,7 +5,7 @@ import { HealthResponse } from '@littleboss/shared';
 import { inngest } from './inngest/client.js';
 import { ping } from './inngest/functions.js';
 import { createPool, type Pool } from './db/pool.js';
-import { createAiCallFunction } from './discussion/inngest.js';
+import { createAiCallFunction, createDiscussionReconcileFunction } from './discussion/inngest.js';
 import { createDiscussionService, type DiscussionService } from './discussion/index.js';
 import { HttpError } from './discussion/errors.js';
 import { registerDiscussionRoutes } from './discussion/routes.js';
@@ -96,7 +96,12 @@ export function buildApp(opts: BuildAppOptions = {}) {
     url: '/api/inngest',
     handler: serve({
       client: inngest,
-      functions: [ping, createAiCallFunction(getService), ...createRunFunctions(getRuns)],
+      functions: [
+        ping,
+        createAiCallFunction(getService),
+        createDiscussionReconcileFunction(getService),
+        ...createRunFunctions(getRuns),
+      ],
     }),
   });
 

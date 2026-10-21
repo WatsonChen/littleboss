@@ -32,6 +32,19 @@ export interface MessageRow {
   queuedAt: Date | null;
   startedAt: Date | null;
   finishedAt: Date | null;
+  autoPlan: AutoPlan | null;
+  autoTurn: number | null;
+  autoKind: AutoKind | null;
+  autoDone: boolean | null;
+  reviewAssetId: string | null;
+  reviewVersion: number | null;
+}
+
+export type AutoKind = NonNullable<MessageView['autoKind']>;
+/** Who speaks in which turn of an automatic discussion, and who writes the summary. Frozen at send. */
+export interface AutoPlan {
+  order: AgentId[];
+  summarizer: AgentId | null;
 }
 
 type Raw = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -64,6 +77,12 @@ function toRow(r: Raw): MessageRow {
     queuedAt: r.queued_at,
     startedAt: r.started_at,
     finishedAt: r.finished_at,
+    autoPlan: r.auto_plan,
+    autoTurn: r.auto_turn,
+    autoKind: r.auto_kind,
+    autoDone: r.auto_done,
+    reviewAssetId: r.review_asset_id,
+    reviewVersion: r.review_version,
   };
 }
 
@@ -78,6 +97,8 @@ export function toView(m: MessageRow): MessageView {
     agentId: m.agentId,
     replyToId: m.replyToId,
     triggerId: m.triggerId,
+    autoKind: m.autoKind,
+    autoDone: m.autoDone,
     content: m.content,
     status: m.status,
     error: m.error,
@@ -119,11 +140,24 @@ export interface NewMessage {
   replyToId?: string;
   triggerId?: string;
   content: string;
-  status: 'sent' | 'queued';
+  /** 'failed' is for an automatic turn that could not be afforded: it is shown and can be retried. */
+  status: 'sent' | 'queued' | 'failed';
+  error?: { code: string; message: string };
   clientRequestId?: string;
   seenMessageIds?: string[];
   agentConfig?: unknown;
   estimatedCostMicro?: number;
+  autoPlan?: AutoPlan;
+  autoTurn?: number;
+  autoKind?: AutoKind;
+  reviewAssetId?: string;
+  reviewVersion?: number;
+}
+
+export interface ThreadSettings {
+  participants: AgentId[];
+  reviewer: AgentId | null;
+  maxRounds: number;
 }
 
 export interface Finish {
@@ -133,6 +167,7 @@ export interface Finish {
   usage: unknown;
   costMicro: number | null;
   costIsEstimate: boolean;
+  autoDone?: boolean | null;
 }
 
 /** Work done while holding the thread's row lock, so sequence numbers and the budget stay consistent. */
@@ -141,6 +176,7 @@ export class ThreadTx {
     private readonly c: pg.PoolClient,
     readonly threadId: string,
     readonly budgetLimitMicro: number,
+    readonly settings: ThreadSettings,
   ) {}
 
   async findByRequestId(clientRequestId: string): Promise<MessageRow[]> {
@@ -175,39 +211,66 @@ export class ThreadTx {
   }
 
   async insert(msgs: NewMessage[]): Promise<MessageRow[]> {
+    const out: MessageRow[] = [];
+    for (const m of msgs) out.push((await this.insertOne(m, false))!);
+    await this.c.query(`update threads set updated_at=now() where id=$1`, [this.threadId]);
+    return out;
+  }
+
+  /** Inserts unless this exact turn (or review) already exists; returns null in that case. */
+  async insertOnce(m: NewMessage): Promise<MessageRow | null> {
+    const row = await this.insertOne(m, true);
+    if (row) await this.c.query(`update threads set updated_at=now() where id=$1`, [this.threadId]);
+    return row;
+  }
+
+  private async insertOne(m: NewMessage, skipConflict: boolean): Promise<MessageRow | null> {
     const { rows: seqRows } = await this.c.query(
       `select coalesce(max(seq), 0)::int as s from thread_messages where thread_id=$1`,
       [this.threadId],
     );
-    let seq = seqRows[0].s as number;
-    const out: MessageRow[] = [];
-    for (const m of msgs) {
-      seq += 1;
-      const { rows } = await this.c.query(
-        `insert into thread_messages
-           (thread_id, seq, role, agent_id, reply_to_id, trigger_id, content, status, client_request_id,
-            seen_message_ids, agent_config, estimated_cost_micro, queued_at)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, case when $8='queued' then now() end)
-         returning *`,
-        [
-          this.threadId,
-          seq,
-          m.role,
-          m.agentId ?? null,
-          m.replyToId ?? null,
-          m.triggerId ?? null,
-          m.content,
-          m.status,
-          m.clientRequestId ?? null,
-          m.seenMessageIds ?? [],
-          m.agentConfig === undefined ? null : JSON.stringify(m.agentConfig),
-          m.estimatedCostMicro ?? null,
-        ],
-      );
-      out.push(toRow(rows[0]));
-    }
-    await this.c.query(`update threads set updated_at=now() where id=$1`, [this.threadId]);
-    return out;
+    const { rows } = await this.c.query(
+      `insert into thread_messages
+         (thread_id, seq, role, agent_id, reply_to_id, trigger_id, content, status, client_request_id,
+          seen_message_ids, agent_config, estimated_cost_micro, queued_at, error, finished_at,
+          auto_plan, auto_turn, auto_kind, review_asset_id, review_version, cost_micro, cost_is_estimate)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, case when $8='queued' then now() end,
+               $13, case when $8='failed' then now() end, $14,$15,$16,$17,$18,
+               case when $8='failed' then 0 end, case when $8='failed' then false else true end)
+       ${skipConflict ? 'on conflict do nothing' : ''}
+       returning *`,
+      [
+        this.threadId,
+        seqRows[0].s + 1,
+        m.role,
+        m.agentId ?? null,
+        m.replyToId ?? null,
+        m.triggerId ?? null,
+        m.content,
+        m.status,
+        m.clientRequestId ?? null,
+        m.seenMessageIds ?? [],
+        m.agentConfig === undefined ? null : JSON.stringify(m.agentConfig),
+        m.estimatedCostMicro ?? null,
+        m.error ? JSON.stringify(m.error) : null,
+        m.autoPlan ? JSON.stringify(m.autoPlan) : null,
+        m.autoTurn ?? null,
+        m.autoKind ?? null,
+        m.reviewAssetId ?? null,
+        m.reviewVersion ?? null,
+      ],
+    );
+    return rows[0] ? toRow(rows[0]) : null;
+  }
+
+  /** The AI turns an automatic discussion has produced so far, in order. */
+  async turnsOf(triggerId: string): Promise<MessageRow[]> {
+    const { rows } = await this.c.query(
+      `select * from thread_messages where trigger_id=$1 and role='agent' and auto_turn is not null
+        order by auto_turn`,
+      [triggerId],
+    );
+    return rows.map(toRow);
   }
 
   /**
@@ -307,17 +370,22 @@ export class ThreadTx {
 export class DiscussionRepository {
   constructor(private readonly pool: Pool) {}
 
-  async createThread(title: string, budgetLimitMicro: number): Promise<ThreadSummary> {
+  async createThread(
+    title: string,
+    budgetLimitMicro: number,
+    s: ThreadSettings = { participants: [], reviewer: null, maxRounds: 3 },
+  ): Promise<ThreadSummary> {
     const { rows } = await this.pool.query(
-      `insert into threads (title, budget_limit_micro) values ($1,$2) returning id`,
-      [title, budgetLimitMicro],
+      `insert into threads (title, budget_limit_micro, participants, reviewer, max_rounds)
+       values ($1,$2,$3,$4,$5) returning id`,
+      [title, budgetLimitMicro, s.participants, s.reviewer, s.maxRounds],
     );
     return (await this.getThread(rows[0].id))!;
   }
 
   private async threadSummaries(where: string, params: unknown[]): Promise<ThreadSummary[]> {
     const { rows } = await this.pool.query(
-      `select t.id, t.title, t.budget_limit_micro, t.updated_at,
+      `select t.id, t.title, t.budget_limit_micro, t.updated_at, t.participants, t.reviewer, t.max_rounds,
          (select count(*) from thread_messages m where m.thread_id = t.id)::int as message_count,
          ((select coalesce(sum(${SPENT_OF_MESSAGE}), 0) from thread_messages m where m.thread_id = t.id)
            + ${spentOfRuns('t.id')})::bigint as spent
@@ -331,6 +399,9 @@ export class DiscussionRepository {
       spentMicro: Number(r.spent),
       updatedAt: r.updated_at.toISOString(),
       messageCount: r.message_count,
+      participants: r.participants,
+      reviewer: r.reviewer,
+      maxRounds: r.max_rounds,
     }));
   }
 
@@ -378,11 +449,17 @@ export class DiscussionRepository {
     try {
       await client.query('begin');
       const { rows } = await client.query(
-        `select budget_limit_micro from threads where id=$1 for update`,
+        `select budget_limit_micro, participants, reviewer, max_rounds from threads where id=$1 for update`,
         [threadId],
       );
       if (!rows[0]) throw new HttpError(404, 'thread_not_found', 'No such discussion.');
-      const out = await fn(new ThreadTx(client, threadId, Number(rows[0].budget_limit_micro)));
+      const out = await fn(
+        new ThreadTx(client, threadId, Number(rows[0].budget_limit_micro), {
+          participants: rows[0].participants,
+          reviewer: rows[0].reviewer,
+          maxRounds: rows[0].max_rounds,
+        }),
+      );
       await client.query('commit');
       return out;
     } catch (err) {
@@ -419,7 +496,7 @@ export class DiscussionRepository {
   async finish(messageId: string, attempt: number, f: Finish): Promise<MessageRow | null> {
     const { rows } = await this.pool.query(
       `update thread_messages set status=$3, content=$4, error=$5, usage=$6,
-         cost_micro=$7, cost_is_estimate=$8, finished_at=now()
+         cost_micro=$7, cost_is_estimate=$8, finished_at=now(), auto_done=$9
        where id=$1 and status='running' and attempt_count=$2
        returning *`,
       [
@@ -431,6 +508,7 @@ export class DiscussionRepository {
         f.usage === null || f.usage === undefined ? null : JSON.stringify(f.usage),
         f.costMicro,
         f.costIsEstimate,
+        f.autoDone ?? null,
       ],
     );
     if (rows[0])
@@ -454,6 +532,49 @@ export class DiscussionRepository {
       sourceMessageIds: r.source_message_ids,
       createdAt: r.created_at.toISOString(),
     }));
+  }
+
+  async getAssetVersion(
+    assetId: string,
+    version: number,
+  ): Promise<{ title: string; content: string } | null> {
+    const { rows } = await this.pool.query(
+      `select a.title, v.content from assets a join asset_versions v on v.asset_id=a.id
+        where a.id=$1 and v.version=$2`,
+      [assetId, version],
+    );
+    return rows[0] ? { title: rows[0].title, content: rows[0].content } : null;
+  }
+
+  /** Discussion turns that finished but whose next step was never created (a lost hand-off). */
+  async listStalledTurns(minIdleMs: number): Promise<MessageRow[]> {
+    const { rows } = await this.pool.query(
+      `select m.* from thread_messages m
+        join thread_messages t on t.id = m.trigger_id
+        where m.role='agent' and m.auto_kind='discussion' and m.status='succeeded'
+          and m.finished_at < now() - $1 * interval '1 millisecond'
+          and m.finished_at > now() - interval '1 day'
+          -- a chain without a summary is over once its last planned turn is done
+          and ((t.auto_plan->>'summarizer') is not null
+               or m.auto_turn + 1 < jsonb_array_length(t.auto_plan->'order'))
+          and not exists (select 1 from thread_messages n
+                           where n.trigger_id = m.trigger_id and n.auto_turn = m.auto_turn + 1)
+        order by m.finished_at limit 50`,
+      [minIdleMs],
+    );
+    return rows.map(toRow);
+  }
+
+  /** Calls that were queued but never handed to a worker. */
+  async listLostQueued(minIdleMs: number): Promise<MessageRow[]> {
+    const { rows } = await this.pool.query(
+      `select * from thread_messages
+        where role='agent' and status='queued' and attempt_count=0
+          and queued_at < now() - $1 * interval '1 millisecond'
+        order by queued_at limit 50`,
+      [minIdleMs],
+    );
+    return rows.map(toRow);
   }
 
   health() {

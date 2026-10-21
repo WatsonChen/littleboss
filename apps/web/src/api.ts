@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  AgentInfo,
   AssetVersionView,
   CallRecord,
   EstimateResponse,
@@ -100,6 +101,8 @@ export function createApiClient(opts: ClientOptions = {}) {
   }
 
   return {
+    listAgents: async () =>
+      (await request('GET', '/api/agents', z.object({ agents: z.array(AgentInfo) }))).agents,
     listThreads: async () =>
       (await request('GET', '/api/threads', z.object({ threads: z.array(ThreadSummary) }))).threads,
     createThread: async (req: CreateThreadRequest = {}) =>
